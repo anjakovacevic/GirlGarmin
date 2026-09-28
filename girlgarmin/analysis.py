@@ -1,6 +1,6 @@
 """Calculations and simple predictions behind the dashboard. No Streamlit here - pure pandas.
 
-Reads the CSVs that garmin_sync.py writes to ./data and the plan from plan.py.
+Reads the CSVs that girlgarmin.sync writes to ./data and the plan from girlgarmin.plan.
 
 Predictions are deliberately simple and explainable:
 - weight: straight-line trend through weigh-ins -> projected weight at the end of the plan
@@ -11,14 +11,13 @@ Predictions are deliberately simple and explainable:
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 
-from plan import P
+from girlgarmin.paths import DATA
+from girlgarmin.plan import P
 
-DATA = Path(__file__).parent / "data"
 PLAN_END = P.START + timedelta(days=7 * P.WEEKS - 1)
 TYPICAL_LUTEAL_DAYS = 14  # used until your own ovulation -> period length is known
 # Target weight-loss pace shown on the "Body & diet" tab (kg/week). ~0.5-0.7% of bodyweight per
@@ -178,7 +177,7 @@ def plan_vs_actual(sets: pd.DataFrame, today: date) -> pd.DataFrame:
 
 
 def today_plan(today: date) -> dict | None:
-    """The plan entry for one date (see program.days()), or None outside the plan."""
+    """The plan entry for one date (see days() in the plan), or None outside the plan."""
     for d in P.days():
         if d["date"] == today:
             return d

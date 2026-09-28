@@ -1,10 +1,10 @@
 """Local Garmin dashboard (Streamlit). Start it with:
 
-    streamlit run dashboard.py        (or double-click dashboard.bat on Windows)
+    streamlit run app/dashboard.py        (from the repo folder, or scripts/dashboard.bat on Windows)
 
 Tabs: Today, Training, Body & diet, Recovery, Cycle, Cardio & VO2max. Everything runs on your
-computer from the files in ./data; the "Sync from Garmin" button runs garmin_sync.py.
-Calculations live in analysis.py, the plan in program.py / my_program.py (see plan.py).
+computer from the files in ./data; the "Sync from Garmin" button runs girlgarmin.sync.
+Calculations live in girlgarmin/analysis.py, the plan in girlgarmin/plans/.
 """
 
 import subprocess
@@ -17,10 +17,12 @@ import plotly.express as px
 import plotly.graph_objects as go
 import streamlit as st
 
-import analysis as A
-from plan import P
+ROOT = Path(__file__).resolve().parent.parent  # repo folder
+sys.path.insert(0, str(ROOT))  # streamlit only puts app/ on the path; we need the girlgarmin package
 
-ROOT = Path(__file__).parent
+from girlgarmin import analysis as A  # noqa: E402
+from girlgarmin.plan import P  # noqa: E402
+
 PHASE_COLORS = {"period": "rgba(220,60,90,0.15)", "luteal": "rgba(245,160,40,0.12)"}
 
 st.set_page_config(page_title="Garmin Dashboard", page_icon="📈", layout="wide")
@@ -67,7 +69,7 @@ with st.sidebar:
     if st.button("🔄 Sync from Garmin", width="stretch",
                  help="Downloads anything new from Garmin Connect (takes 1-3 minutes)."):
         with st.status("Syncing with Garmin Connect...", expanded=True) as status:
-            proc = subprocess.Popen([sys.executable, str(ROOT / "garmin_sync.py")], cwd=ROOT,
+            proc = subprocess.Popen([sys.executable, "-m", "girlgarmin.sync"], cwd=ROOT,
                                     stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
             for line in proc.stdout:
                 st.write(line.rstrip())
@@ -81,7 +83,7 @@ with st.sidebar:
 d = load_all(data_stamp())
 acts, sets, daily, weight, cycles = d["activities"], d["sets"], d["daily"], d["weight"], d["cycles"]
 if daily.empty:
-    st.error("No data yet. Log in once with `python garmin_login.py`, then click **Sync from Garmin** "
+    st.error("No data yet. Log in once with `python -m girlgarmin.login`, then click **Sync from Garmin** "
              "in the sidebar.")
     st.stop()
 

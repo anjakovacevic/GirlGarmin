@@ -1,22 +1,21 @@
 """Upload the 8-week plan to Garmin Connect as scheduled workouts (they sync to your watch).
 
-    python garmin_workouts.py --test      # upload 2 sample workouts, print them back, delete them
-    python garmin_workouts.py             # create + schedule the whole plan on your Garmin calendar
-    python garmin_workouts.py --delete    # remove everything this script created
+    python -m girlgarmin.workouts --test      # upload 2 sample workouts, print them back, delete them
+    python -m girlgarmin.workouts             # create + schedule the whole plan on your Garmin calendar
+    python -m girlgarmin.workouts --delete    # remove everything this script created
 
-The plan comes from my_program.py if you have one, else program.py (see plan.py). Strength
+The plan comes from plans/my_plan.py if you have one, else plans/example_plan.py. Strength
 workouts show exercise, reps and target weight on the watch; warm-up and rest steps end when
 you press the lap button. Everything created is recorded in data/garmin_workouts.json so it
 can be removed cleanly - run --delete before uploading a changed plan.
 
-Requires a saved login (python garmin_login.py).
+Requires a saved login (python -m girlgarmin.login).
 """
 
 import argparse
 import json
 import sys
 import time
-from pathlib import Path
 
 from garminconnect import Garmin
 from garminconnect.workout import (
@@ -36,10 +35,10 @@ from garminconnect.workout import (
     create_warmup_step,
 )
 
-from plan import P
+from girlgarmin.paths import DATA, TOKENSTORE
+from girlgarmin.plan import P
 
-TOKENSTORE = Path("~/.garminconnect").expanduser()  # written by garmin_login.py, outside the repo
-MANIFEST = Path(__file__).parent / "data" / "garmin_workouts.json"
+MANIFEST = DATA / "garmin_workouts.json"  # IDs of everything uploaded, for --delete
 STRENGTH = {"sportTypeId": 5, "sportTypeKey": "strength_training", "displayOrder": 5}
 CARDIO = {"sportTypeId": 6, "sportTypeKey": "cardio_training", "displayOrder": 6}
 RUNNING = {"sportTypeId": 1, "sportTypeKey": "running", "displayOrder": 1}
@@ -140,7 +139,7 @@ def vo2_check_workout() -> RunningWorkout:
 
 def login() -> Garmin:
     if not TOKENSTORE.exists():
-        sys.exit("No saved login. Run first: python garmin_login.py")
+        sys.exit("No saved login. Run first: python -m girlgarmin.login")
     api = Garmin()
     api.login(str(TOKENSTORE))
     return api

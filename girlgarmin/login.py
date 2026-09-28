@@ -1,6 +1,6 @@
 """One-time Garmin Connect login. Saves reusable tokens to ~/.garminconnect.
 
-    python garmin_login.py
+    python -m girlgarmin.login        (run from the repo folder)
 
 Asks for your Garmin email, password (hidden while typing) and, if you use two-step
 verification, the code Garmin sends you. Only the resulting login *tokens* are saved, in the
@@ -13,11 +13,10 @@ Run it again whenever a sync says the login expired (tokens last for months).
 
 import getpass
 import sys
-from pathlib import Path
 
 from garminconnect import Garmin
 
-TOKENSTORE = Path("~/.garminconnect").expanduser()
+from girlgarmin.paths import TOKENSTORE
 
 
 def main() -> None:

@@ -13,10 +13,10 @@ oauth*_token.json
 .streamlit/secrets.toml
 *.pem
 *.key
-# Your private training plan (copy program.py to my_program.py and edit it)
-my_program.py
-# Personal spreadsheet builder and its output
-build_training_plan.py
+# Your private training plan (copy girlgarmin/plans/example_plan.py to my_plan.py and edit it)
+girlgarmin/plans/my_plan.py
+# Personal scripts and notes that aren't part of the project
+personal/
 *.xlsx
 ~$*.xlsx
 # Original activity files
@@ -39,5 +39,3 @@ __pycache__/
 .DS_Store
 Thumbs.db
 desktop.ini
-# Personal notes (the original README with my own numbers)
-MY_NOTES.md

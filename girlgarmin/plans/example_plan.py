@@ -1,11 +1,11 @@
 """Example 8-week training plan: exact sets, reps and loads for every session.
 
 This is the single source of truth for the dashboard ("Today" tab, plan vs. actual) and for
-the workouts that garmin_workouts.py uploads to your watch.
+the workouts that girlgarmin.workouts uploads to your watch.
 
 MAKE IT YOURS
-    1. Copy this file to ``my_program.py`` (it is git-ignored, so it stays private) and edit the
-       copy - plan.py automatically prefers it over this example.
+    1. Copy this file to ``my_plan.py`` in this folder (it is git-ignored, so it stays private)
+       and edit the copy - girlgarmin/plan.py automatically prefers it over this example.
     2. Change ``start_kg`` of every exercise to what you can lift now for the starting reps.
        The example numbers are only a starting point; week 1 is flagged as "adjust".
     3. The plan starts on the Monday saved in ``data/plan_start.txt``. That file is created the
@@ -24,9 +24,10 @@ numbers instead.
 
 from dataclasses import dataclass
 from datetime import date, timedelta
-from pathlib import Path
 
-START_FILE = Path(__file__).parent / "data" / "plan_start.txt"
+from girlgarmin.paths import DATA
+
+START_FILE = DATA / "plan_start.txt"
 
 
 def _plan_start() -> date:

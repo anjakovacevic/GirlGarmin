@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # One-time setup on macOS / Linux: creates .venv, installs the packages, logs you in to Garmin
-# and downloads your data. Needs Python 3.11+.   Run:  bash setup.sh
+# and downloads your data. Needs Python 3.11+.   Run:  bash scripts/setup.sh
 set -euo pipefail
-cd "$(dirname "$0")"
+cd "$(dirname "$0")/.."
 python3 -m venv .venv
 .venv/bin/python -m pip install --upgrade pip
 .venv/bin/python -m pip install -r requirements.txt
 echo
 echo "=== Garmin login (your password is not saved, only a login token in ~/.garminconnect) ==="
-.venv/bin/python garmin_login.py
+.venv/bin/python -m girlgarmin.login
 echo
 echo "=== Downloading your Garmin data (first time can take 10+ minutes) ==="
-.venv/bin/python garmin_sync.py
+.venv/bin/python -m girlgarmin.sync
 echo
-echo "Done! Start the dashboard with:  .venv/bin/streamlit run dashboard.py"
+echo "Done! Start the dashboard with:  bash scripts/dashboard.sh"

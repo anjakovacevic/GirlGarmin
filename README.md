@@ -34,18 +34,18 @@ menstrual cycle together, with simple predictions you can check yourself. It com
 
 1. Download this repo: green **Code** button → **Download ZIP**, then unzip it. You can also use
    `git clone https://github.com/anjakovacevic/GirlGarmin.git`.
-2. Double-click **`setup.bat`**. It installs everything, asks for your Garmin email, password and
+2. Open the **`scripts`** folder and double-click **`setup.bat`**. It installs everything, asks for your Garmin email, password and
    two-step verification code if you use one, and downloads your data. The first download can
    take 10 minutes or more.
-3. Double-click **`dashboard.bat`**. The dashboard opens in your browser.
+3. Double-click **`scripts\dashboard.bat`**. The dashboard opens in your browser.
 
 ### macOS / Linux
 
 ```bash
 git clone https://github.com/anjakovacevic/GirlGarmin.git
 cd GirlGarmin
-bash setup.sh                         # install + Garmin login + first download
-.venv/bin/streamlit run dashboard.py  # open the dashboard
+bash scripts/setup.sh       # install + Garmin login + first download
+bash scripts/dashboard.sh   # open the dashboard
 ```
 
 After that, click **🔄 Sync from Garmin** in the dashboard sidebar whenever you want new data.
@@ -54,12 +54,12 @@ After that, click **🔄 Sync from Garmin** in the dashboard sidebar whenever yo
 
 ## Your login is safe
 
-- `garmin_login.py` asks for your password in the terminal and **never saves it**. It only saves
+- The login step (`girlgarmin/login.py`) asks for your password in the terminal and **never saves it**. It only saves
   a login *token*, and that token goes to a folder in your user home directory
   (`C:\Users\<you>\.garminconnect` or `~/.garminconnect`). That folder is **outside this project**,
   so the token can't end up on GitHub, even if you publish your own fork.
 - Everything Garmin downloads goes to `data/`, which is in `.gitignore` together with token files,
-  `.env` files and your private plan (`my_program.py`).
+  `.env` files and your private plan (`girlgarmin/plans/my_plan.py`).
 - The dashboard only listens on `localhost` (see `.streamlit/config.toml`), so other devices on
   your Wi-Fi can't open it.
 - To log out, delete the `.garminconnect` folder in your home directory.
@@ -101,7 +101,8 @@ The **Today** date picker in the sidebar lets you look at any day of the plan.
 
 ## The training plan
 
-The example plan in [`program.py`](program.py) is an 8-week, 4-day split:
+The example plan in [`girlgarmin/plans/example_plan.py`](girlgarmin/plans/example_plan.py) is an
+8-week, 4-day split:
 
 | Mon | Tue | Wed | Thu | Fri | Sat | Sun |
 |---|---|---|---|---|---|---|
@@ -117,54 +118,67 @@ The example plan in [`program.py`](program.py) is an 8-week, 4-day split:
 
 ### Make it yours
 
-1. Copy `program.py` to **`my_program.py`**. The scripts automatically use `my_program.py` when it
-   exists (see [`plan.py`](plan.py)), and it's git-ignored, so your numbers stay private.
-2. In `my_program.py`, change each exercise's `start_kg` to a weight you can lift for the starting
+1. In `girlgarmin/plans/`, copy `example_plan.py` to **`my_plan.py`**. Everything automatically
+   uses `my_plan.py` when it exists (see [`girlgarmin/plan.py`](girlgarmin/plan.py)), and it's
+   git-ignored, so your numbers stay private.
+2. In `my_plan.py`, change each exercise's `start_kg` to a weight you can lift for the starting
    reps. The example weights are only a starting point, and week 1 is marked "adjust".
 3. Swap exercises, sets or days if you like. `garmin_category` / `garmin_name` are Garmin's
    exercise IDs. Copy them from an existing exercise, or look at a workout you logged on the watch
    (`data/raw/exercise_sets/`).
-4. Optional: change the weight-loss pace band (`TARGET_LOSS_KG_PER_WEEK`) in `analysis.py`.
+4. Optional: change the weight-loss pace band (`TARGET_LOSS_KG_PER_WEEK`) in `girlgarmin/analysis.py`.
 
 ### Put the plan on your watch (optional)
 
 ```bash
-python garmin_workouts.py --test     # try it: uploads 2 workouts, prints them, deletes them
-python garmin_workouts.py            # upload + schedule all 8 weeks on your Garmin calendar
-python garmin_workouts.py --delete   # remove them again (do this before uploading a changed plan)
+python -m girlgarmin.workouts --test     # try it: uploads 2 workouts, prints them, deletes them
+python -m girlgarmin.workouts            # upload + schedule all 8 weeks on your Garmin calendar
+python -m girlgarmin.workouts --delete   # remove them again (do this before uploading a changed plan)
 ```
 
 Strength workouts show each exercise, reps and target weight on the watch. Warm-up and rest end
 when you press **lap**, not on a timer. Cardio workouts use your Garmin heart-rate zones.
 
-On Windows, use `.venv\Scripts\python.exe` instead of `python` if you haven't activated the
-virtual environment. On macOS/Linux, use `.venv/bin/python`.
+Run commands like these from the repo folder. If you haven't activated the virtual environment,
+use `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` (macOS/Linux) instead of `python`.
 
 ---
 
-## Files
+## Project structure
 
-| File | What it does |
-|---|---|
-| `setup.bat` / `setup.sh` | One-time setup: install, log in, first download |
-| `dashboard.bat` / `sync.bat` | Windows double-click launchers |
-| `garmin_login.py` | Garmin login (password + 2FA code), saves the token outside the repo |
-| `garmin_sync.py` | Downloads new data → `data/` (incremental, safe to re-run) |
-| `program.py` | The example 8-week plan: exercises, start loads, progression, schedule |
-| `plan.py` | Picks your `my_program.py` if it exists, else `program.py` |
-| `garmin_workouts.py` | Uploads / schedules the plan on Garmin Connect, and removes it again |
-| `analysis.py` | All calculations and predictions (pure pandas) |
-| `dashboard.py` | The Streamlit dashboard |
-| `.streamlit/config.toml` | Keeps the dashboard private to your computer |
-| `data/` *(created on first run, git-ignored)* | Your Garmin data: raw JSON in `data/raw/`, tables in `data/*.csv` |
+```
+GirlGarmin/
+├── app/
+│   └── dashboard.py          # the Streamlit dashboard
+├── girlgarmin/               # the Python package
+│   ├── login.py              # Garmin login (password + 2FA code), saves the token outside the repo
+│   ├── sync.py               # downloads new data -> data/ (incremental, safe to re-run)
+│   ├── workouts.py           # uploads / schedules the plan on Garmin Connect, and removes it again
+│   ├── analysis.py           # all calculations and predictions (pure pandas)
+│   ├── plan.py               # picks plans/my_plan.py if it exists, else plans/example_plan.py
+│   ├── paths.py              # where data and login tokens live
+│   └── plans/
+│       └── example_plan.py   # the example 8-week plan: exercises, loads, progression, schedule
+├── scripts/                  # launchers: setup, dashboard, sync (.bat for Windows, .sh for macOS/Linux)
+├── .streamlit/config.toml    # keeps the dashboard private to your computer
+├── data/                     # created on first run, git-ignored: your Garmin data
+├── requirements.txt
+└── README.md
+```
+
+In `data/`, raw JSON from Garmin goes to `data/raw/` and the tables the dashboard reads go to
+`data/*.csv`.
 
 ### Useful commands
 
+Run these from the repo folder:
+
 ```bash
-python garmin_sync.py                 # download new data
-python garmin_sync.py --fit           # also download original .FIT files
-python garmin_sync.py --tables-only   # rebuild the CSVs without downloading
-streamlit run dashboard.py            # open the dashboard
+python -m girlgarmin.login               # log in to Garmin (again)
+python -m girlgarmin.sync                # download new data
+python -m girlgarmin.sync --fit          # also download original .FIT files
+python -m girlgarmin.sync --tables-only  # rebuild the CSVs without downloading
+streamlit run app/dashboard.py           # open the dashboard
 ```
 
 ---
@@ -185,8 +199,8 @@ streamlit run dashboard.py            # open the dashboard
   to Garmin the way the app does. If Garmin changes something and syncing breaks, update it with
   `python -m pip install -U "garminconnect[workout]"`.
 - **Known library bug, worked around:** the library's strength-workout helper stores weights
-  1000× too high. `garmin_workouts.py` sets the weight directly instead.
-- **Login expired?** Run `python garmin_login.py` again (or `setup.bat`).
+  1000× too high. `girlgarmin/workouts.py` sets the weight directly instead.
+- **Login expired?** Run `python -m girlgarmin.login` again (or `scripts/setup.bat`).
 
 ## Contributing
 

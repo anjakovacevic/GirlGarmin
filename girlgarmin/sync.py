@@ -1,11 +1,11 @@
 """Download your Garmin Connect data to ./data (incremental - safe to re-run any time).
 
-    python garmin_sync.py                     # all activities + daily health since your first activity
-    python garmin_sync.py --days 730 --fit    # 2 years of daily health + original .FIT files
-    python garmin_sync.py --tables-only       # rebuild the CSVs from data/raw without downloading
+    python -m girlgarmin.sync                     # all activities + daily health since your first activity
+    python -m girlgarmin.sync --days 730 --fit    # 2 years of daily health + original .FIT files
+    python -m girlgarmin.sync --tables-only       # rebuild the CSVs from data/raw without downloading
 
 Only new days/activities are downloaded; the last few days are always refreshed because
-Garmin keeps updating them (sleep, HRV). Needs a saved login first: python garmin_login.py
+Garmin keeps updating them (sleep, HRV). Needs a saved login first: python -m girlgarmin.login
 
 Layout (everything under data/ is git-ignored - it is your personal health data):
     data/raw/activities/<id>.json             activity summary
@@ -32,9 +32,8 @@ from garminconnect import (
     GarminConnectTooManyRequestsError,
 )
 
-TOKENSTORE = Path("~/.garminconnect").expanduser()  # written by garmin_login.py, outside the repo
-DATA = Path(__file__).parent / "data"
-RAW = DATA / "raw"
+from girlgarmin.paths import DATA, RAW, TOKENSTORE
+
 REFRESH_RECENT_DAYS = 3  # re-fetch the last few days, which may still be incomplete
 DELAY = 0.4  # seconds between API calls - be gentle, Garmin rate-limits
 
@@ -259,7 +258,7 @@ def main() -> None:
 
     if not args.tables_only:
         if not TOKENSTORE.exists():
-            sys.exit("No saved login. Run first: python garmin_login.py")
+            sys.exit("No saved login. Run first: python -m girlgarmin.login")
         api = Garmin()
         api.login(str(TOKENSTORE))
         print(f"Logged in as {api.get_full_name()}")
