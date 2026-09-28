@@ -1,0 +1,8 @@
+# Keep the dashboard private: only this computer can open it (not other devices on the Wi-Fi).
+[server]
+address = "localhost"
+headless = false
+
+[browser]
+# Don't send Streamlit usage statistics.
+gatherUsageStats = false

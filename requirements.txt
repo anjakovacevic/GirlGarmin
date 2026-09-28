@@ -1,0 +1,6 @@
+# Install with:  python -m pip install -r requirements.txt   (Python 3.11 or newer)
+garminconnect[workout]>=0.3.16   # unofficial Garmin Connect API (login, downloads, workout upload)
+pandas>=2.2                      # tables and calculations
+numpy>=1.26
+streamlit>=1.50                  # the dashboard
+plotly>=5.20                     # dashboard charts

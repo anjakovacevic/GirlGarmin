@@ -1,0 +1,43 @@
+# ---- Personal data: NEVER commit -------------------------------------------------
+# Everything Garmin downloads (health data, cycle data, weigh-ins, workout IDs)
+data/
+# Garmin login tokens (normally saved in ~/.garminconnect, outside the repo - this is a safety net)
+.garminconnect/
+.garth/
+garmin_tokens.json
+oauth*_token.json
+*token*.json
+# Secrets of any kind
+.env
+.env.*
+.streamlit/secrets.toml
+*.pem
+*.key
+# Your private training plan (copy program.py to my_program.py and edit it)
+my_program.py
+# Personal spreadsheet builder and its output
+build_training_plan.py
+*.xlsx
+~$*.xlsx
+# Original activity files
+*.fit
+*.FIT
+
+# ---- Python --------------------------------------------------------------------
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+
+# ---- Editors / OS --------------------------------------------------------------
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
+desktop.ini
+# Personal notes (the original README with my own numbers)
+MY_NOTES.md
