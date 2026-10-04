@@ -64,6 +64,7 @@ class Ex:
     garmin_name: str        # Garmin exercise name, e.g. "BARBELL_HIP_THRUST_WITH_BENCH"
     per_leg: bool = False   # reps are per leg / per arm
     estimate: bool = True   # starting load is a guess - flagged "adjust" in week 1
+    logged_both_sides: bool = False  # per-leg exercise you log in Garmin as the total of both legs
     note: str = ""
 
 
@@ -98,7 +99,7 @@ SESSIONS = [
         Ex("Seated cable row", 3, 8, 12, 8, 35, 2.5, 120, "1-2", "ROW", "SEATED_CABLE_ROW"),
         Ex("Dumbbell lateral raise", 4, 10, 20, 10, 6, 2, 75, "0-1", "LATERAL_RAISE", "DUMBBELL_LATERAL_RAISE", note="Controlled, no swinging."),
         Ex("Dumbbell biceps curl", 2, 8, 12, 8, 8, 2, 75, "1", "CURL", "DUMBBELL_BICEPS_CURL"),
-    ], WARMUP_UPPER, "VO2max intervals on stair machine or bike (see Cardio column)."),
+    ], WARMUP_UPPER, "VO2max intervals on the bike (see Cardio column)."),
     Session(3, "Legs", [
         Ex("Barbell back squat (full depth)", 3, 6, 10, 8, 40, 2.5, 150, "2", "SQUAT", "BARBELL_BACK_SQUAT", note="Below parallel."),
         Ex("Barbell hip thrust (lighter)", 3, 10, 15, 10, 50, 5, 120, "1-2", "HIP_RAISE", "BARBELL_HIP_THRUST_WITH_BENCH"),
@@ -118,6 +119,11 @@ SESSIONS = [
 
 # Cardio per week: (number of hard intervals, seconds each). Follows Helgerud 2007 (4 x 4 min, 3 min easy between).
 INTERVALS = {1: (3, 180), 2: (4, 180), 3: (4, 240), 4: (4, 240), 5: (4, 240), 6: (4, 240), 7: (4, 240), 8: (3, 240)}
+# Garmin activity each cardio workout is recorded as: "running", "cycling" or "walking".
+# (Not Garmin's "Cardio" type - the watch logs that like strength sets.) Run
+# `python -m girlgarmin.workouts --replace-cardio` after changing these.
+INTERVAL_SPORT = "cycling"  # "running" for treadmill intervals
+ZONE2_SPORT = "walking"
 ZONE2_WALK = "Zone-2 incline walk {m} min (Garmin HR zone 2 - you can still talk in full sentences)."
 OUTDOOR_TEST = ("Easy 25-30 min OUTDOOR run or brisk walk with GPS - most Garmin watches only update VO2max "
                 "from outdoor runs/walks. Compare the week-1 and week-8 readings.")
@@ -142,7 +148,7 @@ def prescription(ex: Ex, week: int) -> tuple[int, int, float | None]:
 def intervals_text(week: int) -> str:
     n, secs = INTERVALS[week]
     return (f"VO2max intervals: 5 min easy, then {n} x {secs // 60} min HARD (8/10 effort, only a few words possible, "
-            f"Garmin HR zone 4) with 3 min easy between, 3 min easy to finish. Stair machine or bike - not running.")
+            f"Garmin HR zone 4) with 3 min easy between, 3 min easy to finish. Exercise bike.")
 
 
 GLUTES, UPPER_A, LEGS, UPPER_B = SESSIONS

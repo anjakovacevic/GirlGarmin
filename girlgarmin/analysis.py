@@ -5,7 +5,8 @@ Reads the CSVs that girlgarmin.sync writes to ./data and the plan from girlgarmi
 Predictions are deliberately simple and explainable:
 - weight: straight-line trend through weigh-ins -> projected weight at the end of the plan
 - lifts: estimated 1RM (Epley) per session, straight-line trend -> projected 1RM at the end of the plan
-- cycle: nightly skin-temperature shift (3 nights above the previous 6, period days excluded) marks
+- cycle: nightly skin-temperature shift (3 nights above the previous 6, ignoring one outlier night and
+  period days) marks
   ovulation after the fact; next period = ovulation + luteal length (else last start + median cycle length)
 """
 
@@ -153,7 +154,9 @@ def plan_rows() -> pd.DataFrame:
             sets, reps, kg = P.prescription(ex, d["week"])
             rows.append({"date": pd.Timestamp(d["date"]), "week": d["week"], "session": s.title, "exercise": ex.name,
                          "garmin_name": ex.garmin_name, "garmin_category": ex.garmin_category,
-                         "plan_sets": sets, "plan_reps": reps, "plan_kg": kg})
+                         "plan_sets": sets, "plan_reps": reps, "plan_kg": kg,
+                         # reps logged for both legs together -> compare per leg
+                         "reps_logged_x": 2 if getattr(ex, "logged_both_sides", False) else 1})
     return pd.DataFrame(rows)
 
 
@@ -172,6 +175,7 @@ def plan_vs_actual(sets: pd.DataFrame, today: date) -> pd.DataFrame:
                         suffixes=("", "_logged"))
     for c in ("actual_sets", "actual_kg", "actual_best_reps"):
         by_name[c] = by_name[c].fillna(by_cat[c])
+    by_name["actual_best_reps"] = by_name.actual_best_reps / by_name.reps_logged_x
     by_name["hit_load"] = by_name.actual_kg >= by_name.plan_kg - 0.01
     return by_name.drop(columns=[c for c in by_name.columns if c.endswith("_logged")])
 
@@ -198,11 +202,13 @@ class CycleInfo:
 
 
 def temperature_shift(nights: pd.Series, min_day: int = 7, margin: float = 0.2) -> int | None:
-    """First cycle day of 3 nights >= max(previous 6 nights) + margin. Period days excluded
-    (wrist temperature dips hard during menses and fakes an early shift)."""
+    """First cycle day of 3 nights >= cover line + margin, where the cover line is the 2nd-highest
+    of the previous 6 nights. Using the 2nd-highest ignores a single warm night (short sleep,
+    alcohol, a hot room) that would otherwise hide a real rise for the next 6 nights.
+    Period days are excluded (wrist temperature dips hard during menses and fakes an early shift)."""
     v = nights[nights.index >= min_day].dropna().sort_index()
     for i in range(6, len(v) - 2):
-        cover = v.iloc[i - 6:i].max()
+        cover = v.iloc[i - 6:i].nlargest(2).iloc[-1]
         if all(round(v.iloc[i + k] - cover, 2) >= margin for k in range(3)):  # round: 0.6-0.4 != 0.2 in floats
             return int(v.index[i])
     return None

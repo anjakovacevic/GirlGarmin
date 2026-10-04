@@ -88,7 +88,8 @@ The **Today** date picker in the sidebar lets you look at any day of the plan.
   errors (a set under half your usual weight) are ignored. During a diet, a *flat* line is a good
   result because it means you're keeping muscle.
 - **Cycle**: ovulation is confirmed after the fact, when skin temperature stays clearly higher for
-  3 nights than the previous 6. Period days are excluded because wrist temperature dips during
+  3 nights than the previous 6. One unusually warm night among those 6 (short sleep, alcohol, a hot
+  room) is ignored so it can't hide a real rise. Period days are excluded because wrist temperature dips during
   your period. Next period = ovulation + your luteal length (14 days until your own is known).
   Before ovulation is confirmed, it's last period + your median cycle length. Studies put wrist
   temperature within ~3 days of true ovulation in ~78% of cycles. That's good enough for planning,
@@ -134,10 +135,17 @@ The example plan in [`girlgarmin/plans/example_plan.py`](girlgarmin/plans/exampl
 python -m girlgarmin.workouts --test     # try it: uploads 2 workouts, prints them, deletes them
 python -m girlgarmin.workouts            # upload + schedule all 8 weeks on your Garmin calendar
 python -m girlgarmin.workouts --delete   # remove them again (do this before uploading a changed plan)
+python -m girlgarmin.workouts --replace-strength   # after editing exercises/loads: re-upload strength from today
 ```
 
 Strength workouts show each exercise, reps and target weight on the watch. Warm-up and rest end
 when you press **lap**, not on a timer. Cardio workouts use your Garmin heart-rate zones.
+
+Cardio workouts are recorded as the sport set in your plan: `INTERVAL_SPORT` for the VO2max
+intervals and `ZONE2_SPORT` for the walks. Each can be `"running"` (also for treadmill),
+`"cycling"` or `"walking"`. Garmin's own "Cardio" type isn't offered because the watch records it
+like a strength workout, with sets and 0 reps. If you change these settings after uploading, run
+`python -m girlgarmin.workouts --replace-cardio`. It swaps only the cardio workouts, from today on.
 
 Run commands like these from the repo folder. If you haven't activated the virtual environment,
 use `.venv\Scripts\python.exe` (Windows) or `.venv/bin/python` (macOS/Linux) instead of `python`.

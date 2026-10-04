@@ -132,7 +132,7 @@ with tab_today:
         rows = []
         for ex in day["session"].exercises:
             n, reps, kg = P.prescription(ex, day["week"])
-            unit = " /leg" if ex.per_leg else ""
+            unit = (" /arm" if "arm" in ex.note.lower() else " /leg") if ex.per_leg else ""
             rows.append({"Exercise": ex.name, "Sets": n, "Reps": f"{reps}{unit}", "Load (kg)": kg, "RIR": ex.rir,
                          "Notes": ex.note + (" Load is an estimate - adjust." if ex.estimate and day["week"] == 1 else "")})
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
@@ -145,13 +145,34 @@ with tab_today:
     st.subheader("This week")
     week_start = pd.Timestamp(today - timedelta(days=today.weekday()))
     plan_week = [x for x in P.days() if week_start <= pd.Timestamp(x["date"]) < week_start + pd.Timedelta(days=7)]
-    done_days = set(acts[acts.type == "strength_training"].start.dt.normalize()) if not acts.empty else set()
+    day_of = acts.start.dt.normalize() if not acts.empty else pd.Series(dtype="datetime64[ns]")
+    lifted = set(day_of[acts.type == "strength_training"]) if not acts.empty else set()
+    moved = set(day_of[acts.type != "strength_training"]) if not acts.empty else set()  # any cardio activity
+
+    def cardio_label(kind: str | None) -> str:
+        if kind == "intervals":
+            return "VO2max intervals"
+        if kind == "vo2check":
+            return "VO2max check run"
+        if kind and kind.startswith("zone2-"):
+            return f"Zone-2 walk {kind.split('-')[1]} min"
+        return ""
+
+    def tick(planned: bool, done: bool, d, optional: bool = False) -> str:
+        if not planned:
+            return ""
+        return "✅" if done else ("—" if d > today or optional else "❌")
+
     st.dataframe(pd.DataFrame([{
         "Day": f"{x['date']:%a %d %b}",
-        "Planned": x["session"].title if x["session"] else ("Rest" if "Rest" in x["cardio"] else x["cardio"][:60]),
-        "Done": ("✅" if pd.Timestamp(x["date"]) in done_days else ("—" if x["date"] > today else "❌"))
-        if x["session"] else "",
+        "Lifting": x["session"].title if x["session"] else "",
+        "Cardio": cardio_label(x["cardio_kind"]) or ("Rest" if not x["session"] else ""),
+        "Lifting done": tick(bool(x["session"]), pd.Timestamp(x["date"]) in lifted, x["date"]),
+        "Cardio done": tick(bool(cardio_label(x["cardio_kind"])), pd.Timestamp(x["date"]) in moved, x["date"],
+                            optional=x["cardio_kind"] == "zone2-30"),
     } for x in plan_week]), hide_index=True, width="stretch")
+    st.caption("Cardio counts as done when any non-strength activity is recorded that day. "
+               "The 30-min zone-2 walks are optional, so a missed one shows —.")
 
 # ---------------------------------------------------------------- training
 with tab_train:
