@@ -21,7 +21,7 @@ menstrual cycle together, with simple predictions you can check yourself. It com
 - A Garmin watch that syncs to **Garmin Connect**. The cycle view needs a recent model that
   measures overnight skin temperature (check your watch's specs). Everything else works on any
   Garmin that tracks sleep and HRV.
-- A Windows, macOS or Linux computer with **Python 3.11 or newer**
+- A Windows, macOS or Linux computer with **Python 3.12 or newer**
   ([python.org/downloads](https://www.python.org/downloads/)). On Windows, tick **"Add python.exe
   to PATH"** during install.
 - Optional but recommended: in the Garmin Connect app, log your **periods** (Menstrual Cycle
