@@ -22,7 +22,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 import pandas as pd
@@ -147,6 +147,15 @@ def load_json(path: Path):
     return (json.loads(path.read_text(encoding="utf-8")) or {}) if path.exists() else {}
 
 
+def minutes(seconds, digits: int | None = None) -> float | None:
+    return round(seconds / 60, digits) if seconds is not None else None
+
+
+def local_time(ms) -> str | None:
+    """Garmin's *Local timestamps are local wall-clock time stored as if it were UTC."""
+    return datetime.fromtimestamp(ms / 1000, timezone.utc).strftime("%Y-%m-%d %H:%M") if ms else None
+
+
 def build_tables() -> None:
     """Flatten data/raw into the CSV tables the dashboard reads."""
     print("Building CSV tables...")
@@ -169,6 +178,8 @@ def build_tables() -> None:
             "total_sets": a.get("totalSets"),
             "total_reps": a.get("totalReps"),
             "vo2max": a.get("vO2MaxValue"),
+            # minutes in each heart-rate zone, using the zones your watch had when you recorded it
+            **{f"z{i}_min": minutes(a.get(f"hrTimeInZone_{i}"), 1) for i in range(1, 6)},
         })
     if rows:
         pd.DataFrame(rows).sort_values("start").to_csv(DATA / "activities.csv", index=False)
@@ -228,6 +239,17 @@ def build_tables() -> None:
             # overnight skin temperature vs personal baseline (deg C); drives the cycle view
             "skin_temp_dev": sleep.get("avgSkinTempDeviationC") if sleep.get("skinTempDataExists") else None,
             "body_battery_gain": sleep.get("bodyBatteryChange"),
+            "body_battery_wake": st.get("bodyBatteryAtWakeTime"),
+            # sleep details for the Sleep tab
+            "deep_min": minutes(sl.get("deepSleepSeconds")),
+            "light_min": minutes(sl.get("lightSleepSeconds")),
+            "rem_min": minutes(sl.get("remSleepSeconds")),
+            "awake_min": minutes(sl.get("awakeSleepSeconds")),
+            "sleep_stress": sl.get("avgSleepStress"),
+            "sleep_avg_hr": sl.get("avgHeartRate"),
+            "restless_moments": sleep.get("restlessMomentsCount"),
+            "bedtime": local_time(sl.get("sleepStartTimestampLocal")),
+            "wake_time": local_time(sl.get("sleepEndTimestampLocal")),
         })
     if daily:
         pd.DataFrame(daily).to_csv(DATA / "daily.csv", index=False)
@@ -254,6 +276,8 @@ def main() -> None:
     ap.add_argument("--days", type=int, help="days of daily health metrics (default: since first activity)")
     ap.add_argument("--fit", action="store_true", help="also download original FIT files")
     ap.add_argument("--tables-only", action="store_true", help="rebuild CSVs from raw data")
+    ap.add_argument("--no-refresh", action="store_true",
+                    help="don't update the coming week's workouts on your watch with your new numbers")
     args = ap.parse_args()
 
     if not args.tables_only:
@@ -270,6 +294,9 @@ def main() -> None:
         sync_daily(api, days)
         sync_cycle(api, first)
     build_tables()
+    if not args.tables_only and not args.no_refresh:
+        from girlgarmin import workouts  # imported here: it reads the CSVs just written
+        workouts.refresh(api)
     print(f"Done. Data in {DATA}")
 
 

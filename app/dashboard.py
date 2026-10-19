@@ -2,7 +2,7 @@
 
     streamlit run app/dashboard.py        (from the repo folder, or scripts/dashboard.bat on Windows)
 
-Tabs: Today, Training, Body & diet, Recovery, Cycle, Cardio & VO2max. Everything runs on your
+Tabs: Today, Training, Body & diet, Recovery, Sleep, Cycle, Cardio & VO2max, Heart-rate zones. Everything runs on your
 computer from the files in ./data; the "Sync from Garmin" button runs girlgarmin.sync.
 Calculations live in girlgarmin/analysis.py, the plan in girlgarmin/plans/.
 """
@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parent.parent  # repo folder
 sys.path.insert(0, str(ROOT))  # streamlit only puts app/ on the path; we need the girlgarmin package
 
 from girlgarmin import analysis as A  # noqa: E402
+from girlgarmin import progression  # noqa: E402
 from girlgarmin.plan import P  # noqa: E402
 
 PHASE_COLORS = {"period": "rgba(220,60,90,0.15)", "luteal": "rgba(245,160,40,0.12)"}
@@ -91,13 +92,14 @@ cycle_info = A.analyse_cycles(daily, cycles) if not cycles.empty else []
 phases = A.phase_by_date(daily, cycle_info) if cycle_info else pd.Series(dtype=object)
 pred = A.predict_cycle(cycle_info, today)
 sessions = A.lift_sessions(sets) if not sets.empty else pd.DataFrame()
+lose_weight = A.load_settings().get("goal") == "lose"
 
 st.title("Garmin dashboard")
 st.caption(f"Data up to {daily.date.max():%a %d %b %Y} · plan {P.FIRST_DAY:%d %b} - {A.PLAN_END:%d %b %Y}"
            + (" (starts soon - edit data/plan_start.txt to move it)" if date.today() < P.FIRST_DAY and hasattr(P, "START_FILE") else ""))
 
-tab_today, tab_train, tab_body, tab_rec, tab_cycle, tab_cardio = st.tabs(
-    ["Today", "Training", "Body & diet", "Recovery", "Cycle", "Cardio & VO2max"])
+tab_today, tab_train, tab_body, tab_rec, tab_sleep, tab_cycle, tab_cardio, tab_zones = st.tabs(
+    ["Today", "Training", "Body & diet", "Recovery", "Sleep", "Cycle", "Cardio & VO2max", "Heart-rate zones"])
 
 # ---------------------------------------------------------------- today
 with tab_today:
@@ -119,7 +121,7 @@ with tab_today:
     if not weight.empty:
         last_w = weight.sort_values("date").iloc[-1]
         c4.metric("Weight", f"{last_w.weight_kg:.1f} kg", f"{wt.per_week:+.2f} kg/week trend" if wt else None,
-                  delta_color="inverse")
+                  delta_color="inverse" if lose_weight else "off")
 
     if rec:
         st.info(f"**Recovery:** {rec['advice']}  \n"
@@ -130,11 +132,14 @@ with tab_today:
         st.subheader(f"{today:%A %d %b}: {day['session'].title}")
         st.caption("Warm-up: " + day["session"].warmup)
         rows = []
+        hist = progression.history(sets, acts)
         for ex in day["session"].exercises:
-            n, reps, kg = P.prescription(ex, day["week"])
+            t = progression.target(ex, day["session"], today, hist, today)
             unit = (" /arm" if "arm" in ex.note.lower() else " /leg") if ex.per_leg else ""
-            rows.append({"Exercise": ex.name, "Sets": n, "Reps": f"{reps}{unit}", "Load (kg)": kg, "RIR": ex.rir,
-                         "Notes": ex.note + (" Load is an estimate - adjust." if ex.estimate and day["week"] == 1 else "")})
+            first = t.based_on is None and ex.start_kg is not None
+            rows.append({"Exercise": ex.name, "Sets": t.sets, "Reps": f"{t.reps}{unit}", "Load (kg)": t.kg, "RIR": ex.rir,
+                         "Based on": f"{t.based_on:%d %b}" if t.based_on else "plan",
+                         "Notes": ex.note + (" First time - the load is a guess, adjust it." if first else "")})
         st.dataframe(pd.DataFrame(rows), hide_index=True, width="stretch")
         if day["cardio"]:
             st.caption("After lifting: " + day["cardio"])
@@ -210,7 +215,7 @@ with tab_train:
         st.plotly_chart(fig, width="stretch")
 
         st.subheader("Plan vs what you did")
-        pva = A.plan_vs_actual(sets, today)
+        pva = A.plan_vs_actual(sets, acts, today)
         if pva.empty:
             st.caption(f"Starts filling in from {P.FIRST_DAY:%d %b}.")
         else:
@@ -232,6 +237,12 @@ with tab_body:
     if weight.empty:
         st.info("No weigh-ins yet. Log your weight in Garmin Connect 3-4 mornings a week.")
     else:
+        goals = ["Just track my weight", "Lose weight"]
+        goal = st.radio("Your goal", goals, horizontal=True, index=int(lose_weight),
+                        help="Choosing 'Lose weight' shows a safe pace band based on your current weight.")
+        if (goal == goals[1]) != lose_weight:
+            A.save_setting("goal", "lose" if goal == goals[1] else "track")
+            st.rerun()  # so the Today tab, drawn above, picks up the new goal too
         w = weight.sort_values("date")
         wt = A.weight_forecast(w)
         fig = go.Figure()
@@ -239,11 +250,12 @@ with tab_body:
         last = w.iloc[-1]
         end = pd.Timestamp(A.PLAN_END)
         weeks_left = max((end - last.date).days / 7, 0)
-        lo, hi = A.TARGET_LOSS_KG_PER_WEEK
-        fig.add_scatter(x=[last.date, end, end, last.date], fill="toself", fillcolor="rgba(46,160,67,0.12)",
-                        line_width=0, name=f"Target pace (-{lo} to -{hi} kg/week)",
-                        y=[last.weight_kg, last.weight_kg - lo * weeks_left, last.weight_kg - hi * weeks_left,
-                           last.weight_kg])
+        lo, hi = A.loss_target(last.weight_kg)
+        if lose_weight:
+            fig.add_scatter(x=[last.date, end, end, last.date], fill="toself", fillcolor="rgba(46,160,67,0.12)",
+                            line_width=0, name=f"Target pace (-{lo} to -{hi} kg/week)",
+                            y=[last.weight_kg, last.weight_kg - lo * weeks_left, last.weight_kg - hi * weeks_left,
+                               last.weight_kg])
         if wt:
             fig.add_scatter(x=[w.date.iloc[0], end], y=[wt.projected - wt.per_week / 7 * (end - w.date.iloc[0]).days,
                                                            wt.projected], mode="lines", line_dash="dot",
@@ -255,9 +267,11 @@ with tab_body:
         if wt:
             c2.metric("Trend", f"{wt.per_week:+.2f} kg/week")
             c3.metric(f"Projected {A.PLAN_END:%d %b} at this trend", f"{wt.projected:.1f} kg")
-        st.caption(f"Target pace: -{lo} to -{hi} kg/week (change it in analysis.py) -> about "
-                   f"{last.weight_kg - hi * weeks_left:.1f}-{last.weight_kg - lo * weeks_left:.1f} kg by {A.PLAN_END:%d %b}. "
-                   "The trend line uses all your weigh-ins, so it catches up a few weeks after you change your eating. "
+        pct_lo, pct_hi = A.TARGET_LOSS_PCT_PER_WEEK
+        st.caption((f"Target pace: -{lo} to -{hi} kg/week ({pct_lo}-{pct_hi}% of your current weight, which keeps "
+                    f"strength and muscle best) -> about {last.weight_kg - hi * weeks_left:.1f}-"
+                    f"{last.weight_kg - lo * weeks_left:.1f} kg by {A.PLAN_END:%d %b}. " if lose_weight else "")
+                   + "The trend line uses all your weigh-ins, so it catches up a few weeks after you change your eating. "
                    "Weight swings ~1 kg day to day - judge the weekly average.")
         steps = daily[["date", "steps"]].dropna()
         fig = px.bar(steps, x="date", y="steps", height=260, title="Daily steps")
@@ -283,6 +297,74 @@ with tab_rec:
         st.subheader("Your averages by cycle phase")
         st.dataframe(tbl.groupby("phase")[["hrv_last_night", "resting_hr", "sleep_score", "skin_temp_dev"]]
                      .mean().round(1), width="stretch")
+
+# ---------------------------------------------------------------- sleep
+with tab_sleep:
+    nights = A.sleep_nights(daily, phases)
+    if nights.empty:
+        st.info("Click **Sync from Garmin** in the sidebar to load sleep details.")
+    else:
+        last = nights.iloc[-1]
+        usual = nights.tail(30).median(numeric_only=True)
+        st.subheader(f"Last night ({last.date:%a %d %b}): {last.kind}")
+        def vs_usual(col, fmt, unit=""):
+            """(value, delta) for a metric; '-' and no delta when your watch doesn't measure it."""
+            v, u = last.get(col), usual.get(col)
+            if pd.isna(v):
+                return "-", None
+            return f"{v:{fmt}}{unit}", (f"{v - u:+{fmt}}{unit} vs usual" if pd.notna(u) else None)
+
+        c1, c2, c3, c4, c5 = st.columns(5)
+        c1.metric("Sleep", *vs_usual("sleep_h", ".1f", " h"))
+        deep, deep_delta = vs_usual("deep_min", ".0f", " min")
+        c2.metric("Deep sleep", deep + (f" ({last.deep_pct:.0f}%)" if pd.notna(last.deep_pct) else ""), deep_delta)
+        c3.metric("Body Battery gained", *vs_usual("body_battery_gain", ".0f"))
+        c4.metric("Stress during sleep", *vs_usual("sleep_stress", ".0f"), delta_color="inverse")
+        c5.metric("Bedtime", pd.to_datetime(last.bedtime).strftime("%H:%M") if pd.notna(last.bedtime) else "-")
+        st.caption("'Usual' = median of your last 30 nights. A night counts as restorative when it is 7+ h, Body Battery "
+                   f"gains more than {A.LOW_BATTERY_GAIN} (or you wake above {A.LOW_BATTERY_WAKE}) and deep sleep is "
+                   f"at least {A.LOW_DEEP_PCT}% of the night.")
+
+        fig = px.bar(nights, x="date", y="sleep_h", color="kind", color_discrete_map=A.SLEEP_KINDS,
+                     hover_data={"deep_min": True, "body_battery_gain": True, "sleep_stress": True, "kind": False},
+                     category_orders={"kind": list(A.SLEEP_KINDS)}, height=340, title="Every night")
+        fig.add_hline(y=A.LONG_NIGHT_H, line_dash="dot", line_color="grey")
+        shade_phases(fig, phases)
+        fig.update_layout(yaxis_title="hours asleep", xaxis_title=None, legend_title=None, margin=dict(t=40))
+        st.plotly_chart(fig, width="stretch")
+
+        tips = A.sleep_tips(nights)
+        st.subheader("What would help - from your own nights")
+        st.markdown("\n".join(f"- {t}" for t in tips) if tips else "No clear pattern yet - check back after more nights.")
+
+        st.subheader("Long nights that didn't restore you - what was different")
+        st.dataframe(A.sleep_compare(nights), width="stretch")
+        st.caption("Medians of your 7h+ nights. Stress and heart rate during sleep usually explain low battery far "
+                   "better than hours slept.")
+
+        long = nights[nights.sleep_h >= A.LONG_NIGHT_H]
+        left, right = st.columns(2)
+        fig = px.scatter(long, x="sleep_stress", y="body_battery_gain", color="kind", color_discrete_map=A.SLEEP_KINDS,
+                         hover_data={"date": "|%d %b", "sleep_h": ":.1f"}, height=340,
+                         title="7h+ nights: calmer sleep = more battery")
+        fig.update_layout(xaxis_title="stress during sleep", yaxis_title="Body Battery gained", legend_title=None,
+                          showlegend=False, margin=dict(t=40))
+        left.plotly_chart(fig, width="stretch")
+        bins = pd.cut(long.bed_h, [0, 23, 24, A.LATE_BED_H, 48], labels=["before 23:00", "23-24", "24-00:30", "after 00:30"])
+        by_bed = long.groupby(bins, observed=True).deep_min.agg(["median", "count"]).reset_index()
+        fig = px.bar(by_bed, x="bed_h", y="median", text="count", height=340, title="Deep sleep by bedtime (7h+ nights)")
+        fig.update_traces(texttemplate="%{text} nights", marker_color="#8e6cc0")
+        fig.update_layout(xaxis_title=None, yaxis_title="deep sleep (median min)", margin=dict(t=40))
+        right.plotly_chart(fig, width="stretch")
+        if long.phase.notna().any():
+            by_ph = long.groupby("phase")[["low_battery", "low_deep"]].mean().mul(100).round().reset_index()
+            fig = px.bar(by_ph.melt("phase", var_name="problem", value_name="pct"), x="phase", y="pct", color="problem",
+                         barmode="group", height=300, title="Share of 7h+ nights with a problem, by cycle phase",
+                         category_orders={"phase": ["period", "follicular", "luteal"]},
+                         color_discrete_map={"low_battery": "#e0a030", "low_deep": "#8e6cc0"})
+            fig.update_layout(yaxis_title="% of nights", xaxis_title=None, legend_title=None, margin=dict(t=40))
+            st.plotly_chart(fig, width="stretch")
+        st.caption("Patterns, not proof - and not medical advice.")
 
 # ---------------------------------------------------------------- cycle
 with tab_cycle:
@@ -333,18 +415,77 @@ with tab_cycle:
 
 # ---------------------------------------------------------------- cardio
 with tab_cardio:
-    cardio_types = ["indoor_cardio", "treadmill_running", "running", "stair_climbing", "floor_climbing", "walking",
-                    "cycling", "indoor_cycling", "hiking"]
-    c = acts[acts.type.isin(cardio_types)].copy()
+    c = acts[acts.type.isin(A.CARDIO_TYPES)].copy() if not acts.empty else acts
     if c.empty:
         st.info("No cardio sessions yet.")
     else:
         fig = px.scatter(c, x="start", y="duration_min", size="duration_min", color="type", hover_data=["avg_hr", "max_hr"],
                          height=360, title="Cardio sessions (bubble size = minutes)")
         st.plotly_chart(fig, width="stretch")
-        show = c[["start", "name", "type", "duration_min", "avg_hr", "max_hr"]].sort_values("start", ascending=False)
+        zcols = [z for z in A.ZONES if z in c]
+        show = c[["start", "name", "type", "duration_min", "avg_hr", "max_hr"] + zcols].sort_values("start", ascending=False)
         show["start"] = show.start.dt.strftime("%a %d %b %H:%M")
+        if zcols:
+            show["main zone"] = show[zcols].idxmax(axis=1).str[1].where(show[zcols].sum(axis=1) > 0)
+            show = show.rename(columns={z: f"Z{z[1]} min" for z in zcols})
         st.dataframe(show, hide_index=True, width="stretch")
+
+    st.subheader("Time in heart-rate zones")
+    zc1, zc2 = st.columns([1, 2])
+    per = zc1.radio("Show per", ["Week", "Month"], horizontal=True)
+    all_acts = zc2.checkbox("Include strength training and other workouts", value=False,
+                            help="WHO counts any activity that gets your heart rate up; strength sessions mostly sit in zone 1-2.")
+    zt = A.zone_time(acts, cardio_only=not all_acts)
+    if zt.empty:
+        st.info("No heart-rate zone data yet - click **Sync from Garmin** in the sidebar.")
+    else:
+        zp = A.zone_periods(zt, "W" if per == "Week" else "M", daily)
+        long_z = zp[A.ZONES].rename(columns={z: f"Zone {z[1]}" for z in A.ZONES}).reset_index(names="period")             .melt("period", var_name="zone", value_name="minutes")
+        fig = px.bar(long_z, x="period", y="minutes", color="zone", color_discrete_map=A.ZONE_COLORS, height=420,
+                     title=f"Workout minutes per zone, per {per.lower()}")
+        fig.add_scatter(x=zp.index, y=zp.moderate_eq, mode="lines+markers", name="WHO minutes from workouts",
+                        line=dict(color="black", width=2))
+        if "garmin_intensity" in zp:
+            fig.add_scatter(x=zp.index, y=zp.garmin_intensity, mode="lines+markers", name="Garmin all-day intensity minutes",
+                            line=dict(color="#7a52b3", width=2, dash="dot"))
+        fig.add_scatter(x=zp.index, y=zp.target_lo, mode="lines", name=f"WHO minimum ({A.WHO_WEEKLY_MIN[0]} min/week)",
+                        line=dict(color="#3c9a5f", dash="dash"))
+        fig.add_scatter(x=zp.index, y=zp.target_hi, mode="lines", name=f"WHO extra benefit ({A.WHO_WEEKLY_MIN[1]} min/week)",
+                        line=dict(color="#3c9a5f", dash="dot", width=1))
+        fig.update_layout(barmode="stack", xaxis_title=None, yaxis_title="minutes", legend_orientation="h",
+                          margin=dict(t=40))
+        st.plotly_chart(fig, width="stretch")
+
+        cur = zp.iloc[-1] if zp.index[-1] >= pd.Timestamp(today) - pd.Timedelta(days=6 if per == "Week" else 30) else None
+        full = zp.iloc[:-1] if cur is not None else zp  # leave out the week / month still in progress
+        recent = full.tail(4 if per == "Week" else 3)
+        m1, m2, m3, m4 = st.columns(4)
+        m1.metric(f"WHO minutes from workouts, last {len(recent)} {per.lower()}s (avg)", f"{recent.moderate_eq.mean():.0f}",
+                  f"target {recent.target_lo.mean():.0f}+", delta_color="off")
+        if "garmin_intensity" in zp:
+            m2.metric(f"Garmin all-day intensity minutes (avg)", f"{recent.garmin_intensity.mean():.0f}",
+                      f"{recent.garmin_intensity.mean() - recent.target_lo.mean():+.0f} vs WHO minimum")
+        easy = recent.z1_min.sum() + recent.z2_min.sum()
+        tot = recent[A.ZONES].sum().sum()
+        m3.metric("Easy share (zone 1-2)", f"{easy / tot:.0%}" if tot else "-", f"target ~{A.EASY_SHARE_TARGET:.0%}",
+                  delta_color="off")
+        m4.metric("Hard minutes (zone 4-5)", f"{recent.z4_min.sum() + recent.z5_min.sum():.0f}",
+                  f"in the last {len(recent)} {per.lower()}s", delta_color="off")
+        if cur is not None:
+            st.caption(f"This {per.lower()} so far: {cur.moderate_eq:.0f} WHO minutes from workouts"
+                       + (f", {cur.garmin_intensity:.0f} Garmin intensity minutes" if pd.notna(cur.get("garmin_intensity")) else "")
+                       + f" (target {cur.target_lo:.0f}+). Averages above use the last full {per.lower()}s.")
+        st.markdown(f"""
+**Targets, for health**
+- **WHO:** {A.WHO_WEEKLY_MIN[0]}-{A.WHO_WEEKLY_MIN[1]} min of moderate activity a week (zone 2-3), where one vigorous
+  minute (zone 4-5) counts as two, plus strength training on 2+ days. The black line is your workouts only; Garmin's
+  intensity minutes (purple) also count brisk walking during the day, so they are usually the fairer comparison.
+- **80/20 for fitness:** about {A.EASY_SHARE_TARGET:.0%} of cardio time easy (zone 1-2), the rest harder - mostly a
+  little zone 4-5 (like intervals) rather than lots of zone 3, which tires you without adding as much.
+- **Zone 5** is for short intervals only - a few minutes a week at most is plenty.
+""")
+        st.caption("Minutes are counted with the zones your watch had when you recorded each workout (see the "
+                   "Heart-rate zones tab). If you change your zones, only new workouts use them.")
     v = acts[acts.vo2max.notna()][["start", "name", "vo2max"]] if "vo2max" in acts else pd.DataFrame()
     st.subheader("VO2max")
     if v.empty:
@@ -355,3 +496,74 @@ with tab_cardio:
     if checks:
         st.caption("Plan: VO2max check runs on " + " and ".join(f"{c:%a %d %b}" for c in checks)
                    + " - compare the readings.")
+
+# ---------------------------------------------------------------- heart-rate zones
+with tab_zones:
+    zs = A.garmin_zones()
+    if zs is None:
+        st.info("No heart-rate zone settings yet - click **Sync from Garmin** in the sidebar.")
+    else:
+        tests = A.load_hr_tests()
+        with st.expander("Your test results (leave at 0 if you haven't done a test)", expanded=not tests):
+            t1, t2, t3 = st.columns(3)
+            new = {
+                "talk_hr": t1.number_input("Talk test: avg HR, last 10 min", 0, 220, tests.get("talk_hr", 0),
+                                           help="Easiest test. 20-30 min at a pace where you can still talk in full sentences."),
+                "lthr": t2.number_input("Threshold test: avg HR, last 20 min", 0, 220, tests.get("lthr", 0),
+                                        help="30 min run as hard as you can hold evenly = your lactate-threshold HR."),
+                "max_hr": t3.number_input("Max HR test: highest HR seen", 0, 230, tests.get("max_hr", 0),
+                                          help="Only when healthy and rested: 3 hard 2-3 min hill efforts, the last all-out."),
+            }
+            if {k: v for k, v in new.items() if v} != tests:
+                A.save_hr_tests(new)
+                tests = A.load_hr_tests()
+        adv = A.hr_zone_advice(zs, daily, acts, tests)
+        lo, hi = adv["zone2"]
+
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Your zone 2 (estimate)", f"{lo}-{hi} bpm")
+        c2.metric("Max HR in use", adv["max_used"], "220 - age formula" if adv["max_from_formula"] else "from your test",
+                  delta_color="off")
+        c3.metric("Highest HR seen in a workout", f"{adv['max_seen']:.0f}" if adv["max_seen"] else "-")
+        c4.metric("Resting HR", adv["resting_now"], f"Garmin uses {zs.resting_hr}", delta_color="off")
+        st.caption(f"Zone 2 based on: {adv['zone2_basis']}.")
+
+        st.subheader("What to change in Garmin")
+        if adv["tips"]:
+            st.markdown("\n".join(f"- {t}" for t in adv["tips"]))
+        else:
+            st.success("Your Garmin zone settings match your data.")
+        st.caption("Garmin Connect app: profile picture -> Settings -> User Settings -> Heart Rate Zones "
+                   "(or on the watch: Settings -> User Profile -> Heart Rate).")
+
+        st.subheader("Zones by method (bpm)")
+        st.dataframe(adv["table"], width="stretch")
+        st.caption("Different methods give different numbers because they start from different guesses. "
+                   "Your own test results beat any formula.")
+
+        runs = acts[acts.type.isin(["indoor_cardio", "treadmill_running", "running", "stair_climbing", "hiking",
+                                    "walking", "cycling", "indoor_cycling"]) & acts.avg_hr.notna()] if not acts.empty else acts
+        if not runs.empty:
+            fig = px.scatter(runs, x="start", y="avg_hr", color="type", size="duration_min", hover_data=["name", "max_hr"],
+                             height=380, title="Average HR of your cardio sessions vs estimated zone 2")
+            fig.add_hrect(y0=lo, y1=hi, fillcolor="rgba(60,170,90,0.18)", line_width=0,
+                          annotation_text="zone 2 estimate", annotation_position="top left")
+            for f, name in zip(zs.floors[1:3], ["Garmin zone 2 starts", "Garmin zone 3 starts"]):
+                fig.add_hline(y=f, line_dash="dot", line_color="grey", annotation_text=name, annotation_position="bottom right")
+            fig.update_layout(yaxis_title="average HR (bpm)", xaxis_title=None, margin=dict(t=40))
+            st.plotly_chart(fig, width="stretch")
+            st.caption("If easy sessions where you could chat sit above the green band, your zones are set too low.")
+
+        with st.expander("How to find your real zone 2"):
+            st.markdown("""
+1. **Talk test (free, good enough for most people).** After a warm-up, run or walk 20-30 min at a pace where you can
+   speak in full sentences but wouldn't want to sing. Your average HR over the last 10 minutes is about the
+   **top of zone 2**.
+2. **Threshold test (more precise).** After a warm-up, run 30 min as hard as you can hold evenly. Average HR of the
+   last 20 min ~ your **lactate-threshold HR (LTHR)**. Zone 2 ~ 85-89% of it.
+3. **Max-HR test (hardest).** Only when healthy and well rested. After a warm-up, 3 hard uphill efforts of 2-3 min,
+   the last one all-out. The highest number you see is close to your real max.
+
+Enter your result above - the zone 2 estimate, the table and the chart update. Then copy the numbers into Garmin.
+Not medical advice; if you have ever had heart symptoms, check with a doctor before an all-out test.
+""")

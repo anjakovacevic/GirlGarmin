@@ -5,10 +5,13 @@
     python -m girlgarmin.workouts --delete    # remove everything this script created
     python -m girlgarmin.workouts --replace-cardio     # re-upload only the cardio workouts, from today on
     python -m girlgarmin.workouts --replace-strength   # re-upload only the strength workouts, from today on
+    python -m girlgarmin.workouts --refresh   # re-upload the next 7 days' strength workouts (sync runs this)
+    python -m girlgarmin.workouts --extend    # upload plan days after the last one on your calendar
 
 The plan comes from plans/my_plan.py if you have one, else plans/example_plan.py. Strength
 workouts show exercise, reps and target weight on the watch; warm-up and rest steps end when
-you press the lap button. Everything created is recorded in data/garmin_workouts.json so it
+you press the lap button. Targets come from what you logged last time (girlgarmin.progression),
+so girlgarmin.sync refreshes the coming week's workouts after every download. Everything created is recorded in data/garmin_workouts.json so it
 can be removed cleanly - run --delete before uploading a changed plan.
 
 Requires a saved login (python -m girlgarmin.login).
@@ -18,7 +21,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import date
+from datetime import date, timedelta
 
 from garminconnect import Garmin
 from garminconnect.workout import (
@@ -39,6 +42,7 @@ from garminconnect.workout import (
     create_warmup_step,
 )
 
+from girlgarmin import analysis, progression
 from girlgarmin.paths import DATA, TOKENSTORE
 from girlgarmin.plan import P
 
@@ -76,13 +80,26 @@ def until_lap(step):
     return step
 
 
+_history = None
+
+
+def logged_history():
+    """Logged sets (from the last sync) that the targets are based on, read once."""
+    global _history
+    if _history is None:
+        d = analysis.load()
+        _history = progression.history(d["sets"], d["activities"])
+    return _history
+
+
 def strength_workout(session: P.Session, week: int, date, cardio: str) -> StrengthWorkout:
     """One strength session for one date: warm-up, then sets x (exercise + rest) per exercise."""
     steps, order = [until_lap(create_warmup_step(0, 1))], 2
-    lines = [f"Week {week}{' (lighter week)' if week == P.DELOAD_WEEK else ''}. Warm-up (press lap when done): {session.warmup}",
+    lines = [f"Week {week}{' (lighter week)' if progression.is_deload(week) else ''}. Warm-up (press lap when done): {session.warmup}",
              "Rest: press lap when you're ready for the next set. Guide: ~2-3 min big lifts, ~1-1.5 min isolation."]
     for ex in session.exercises:
-        sets, reps, kg = P.prescription(ex, week)
+        t = progression.target(ex, session, date, logged_history())
+        sets, reps, kg = t.sets, t.reps, t.kg
         both = getattr(ex, "logged_both_sides", False)  # watch target = what you log: both legs together
         exercise = create_strength_exercise_step(ex.garmin_category, order + 1, reps * 2 if both else reps,
                                                  exercise_name=ex.garmin_name)
@@ -98,7 +115,7 @@ def strength_workout(session: P.Session, week: int, date, cardio: str) -> Streng
         per = (f" per {side} (log {reps * 2})" if both else f" per {side}") if ex.per_leg else ""
         load = f" @ {kg:g} kg" if kg is not None else ""
         lines.append(f"{ex.name}: {sets}x{reps}{per}{load}, RIR {ex.rir}"
-                     + (" (estimate - adjust)" if ex.estimate and week == 1 else ""))
+                     + (" (first time - adjust)" if t.based_on is None and kg is not None else ""))
     if cardio:
         lines.append("After: " + cardio)
     return StrengthWorkout(
@@ -220,7 +237,13 @@ def sched(api: Garmin, made: dict, wid: int, day, name: str) -> None:
 def upload_cardio(api: Garmin, made: dict, from_day) -> None:
     """Upload the cardio workouts and schedule them on every plan day from `from_day` on.
     Zone-2 walks and the VO2max check are uploaded once and reused on each of their days."""
+    # zone-2 walks / VO2max check already uploaded are reused, not uploaded again
     reused: dict[str, int] = {}
+    for w in made["workouts"]:
+        if w["name"].startswith("Zone 2 incline walk "):
+            reused.setdefault(f"zone2-{w['name'].split()[4]}", w["id"])
+        elif w["name"].startswith("VO2max check"):
+            reused.setdefault("vo2check", w["id"])
     for d in P.days():
         day, week, kind = d["date"], d["week"], d["cardio_kind"]
         if day < from_day or not kind:
@@ -236,11 +259,11 @@ def upload_cardio(api: Garmin, made: dict, from_day) -> None:
             sched(api, made, reused[kind], day, name)
 
 
-def upload_strength(api: Garmin, made: dict, from_day) -> None:
-    """Upload one strength workout per session day from `from_day` on and schedule it."""
+def upload_strength(api: Garmin, made: dict, from_day, to_day=None) -> None:
+    """Upload one strength workout per session day from `from_day` (to `to_day`) and schedule it."""
     for d in P.days():
         s, day = d["session"], d["date"]
-        if s and day >= from_day:
+        if s and day >= from_day and (to_day is None or day <= to_day):
             w = strength_workout(s, d["week"], day, d["cardio"])
             sched(api, made, record(api, made, w, "strength"), day, w.workoutName)
             print(f"  {day} {w.workoutName}")
@@ -261,8 +284,9 @@ def is_cardio(w: dict) -> bool:
     return w.get("kind", "cardio" if ("VO2max" in w["name"] or "Zone 2" in w["name"]) else "strength") == "cardio"
 
 
-def replace(api: Garmin, kind: str) -> None:
+def replace(api: Garmin, kind: str, days: int | None = None) -> None:
     """Re-upload one kind of workout ("strength" or "cardio") from today on, after editing the plan.
+    With `days`, only the strength workouts of the next `days` days.
 
     strength: deletes the strength workouts scheduled from today on (past ones stay on your
               calendar) and uploads them again from the current plan.
@@ -273,12 +297,14 @@ def replace(api: Garmin, kind: str) -> None:
         sys.exit(f"{MANIFEST} not found - upload the plan first.")
     made = json.loads(MANIFEST.read_text(encoding="utf-8"))
     from_day = max(date.today(), P.FIRST_DAY)
+    to_day = from_day + timedelta(days=days - 1) if days else None
     if kind == "cardio":
         old = {w["id"] for w in made["workouts"] if is_cardio(w)}
     else:
         strength = {w["id"] for w in made["workouts"] if not is_cardio(w)}
         old = {x["workout_id"] for x in made["scheduled"]
-               if x["workout_id"] in strength and x["date"] >= from_day.isoformat()}
+               if x["workout_id"] in strength and x["date"] >= from_day.isoformat()
+               and (to_day is None or x["date"] <= to_day.isoformat())}
     for wid in old:  # deleting a workout also removes its calendar entries
         api.delete_workout(wid)
         time.sleep(0.3)
@@ -287,8 +313,32 @@ def replace(api: Garmin, kind: str) -> None:
     save_manifest(made)
     print(f"Deleted {len(old)} {kind} workouts.")
     before = len(made["workouts"])
-    (upload_cardio if kind == "cardio" else upload_strength)(api, made, from_day)
+    if kind == "cardio":
+        upload_cardio(api, made, from_day)
+    else:
+        upload_strength(api, made, from_day, to_day)
     print(f"Uploaded {len(made['workouts']) - before} {kind} workouts, scheduled from {from_day}.")
+
+
+def refresh(api: Garmin, days: int = 7) -> None:
+    """Re-upload the coming week's strength workouts so their targets follow your latest logs.
+    Does nothing if the plan was never uploaded."""
+    if MANIFEST.exists():
+        replace(api, "strength", days)
+
+
+def extend(api: Garmin) -> None:
+    """Upload the plan days after the last day already on your calendar (e.g. after making the
+    plan longer). Days before that are left as they are."""
+    if not MANIFEST.exists():
+        sys.exit(f"{MANIFEST} not found - upload the plan first.")
+    made = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    last = max((x["date"] for x in made["scheduled"]), default=None)
+    from_day = max(date.fromisoformat(last) + timedelta(days=1) if last else P.FIRST_DAY, date.today())
+    before = len(made["workouts"])
+    upload_strength(api, made, from_day)
+    upload_cardio(api, made, from_day)
+    print(f"Uploaded {len(made['workouts']) - before} workouts for the days from {from_day}.")
 
 
 def delete_all(api: Garmin) -> None:
@@ -311,6 +361,10 @@ if __name__ == "__main__":
                     help="re-upload only the cardio workouts (from today on), e.g. after changing INTERVAL_SPORT")
     ap.add_argument("--replace-strength", action="store_true",
                     help="re-upload only the strength workouts from today on, e.g. after changing exercises or loads")
+    ap.add_argument("--refresh", action="store_true",
+                    help="re-upload the next 7 days' strength workouts with targets from your latest logs")
+    ap.add_argument("--extend", action="store_true",
+                    help="upload the plan days after the last one on your calendar, e.g. after adding weeks")
     args = ap.parse_args()
     api = login()
     if args.test:
@@ -321,5 +375,9 @@ if __name__ == "__main__":
         replace(api, "cardio")
     elif args.replace_strength:
         replace(api, "strength")
+    elif args.refresh:
+        refresh(api)
+    elif args.extend:
+        extend(api)
     else:
         create_all(api)

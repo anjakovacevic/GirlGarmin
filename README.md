@@ -72,10 +72,12 @@ After that, click **🔄 Sync from Garmin** in the dashboard sidebar whenever yo
 |---|---|---|
 | **Today** | Today's session with sets / reps / kg, recovery advice, cycle day, weight, this week's plan with ✅/❌ | Recovery advice (cycle-aware) |
 | **Training** | Estimated 1-rep max per exercise over time, weekly sets per muscle, plan vs what you actually did | Each lift's estimated 1RM at the end of the plan |
-| **Body & diet** | Weigh-ins, target weight-loss pace band, daily steps | Weight at the end of the plan at your current trend |
+| **Body & diet** | Weigh-ins, your goal (just track / lose weight), target weight-loss pace band if losing, daily steps | Weight at the end of the plan at your current trend |
 | **Recovery** | HRV (+7-day average), resting HR, sleep score, Body Battery, shaded by cycle phase | Your normal values per cycle phase |
+| **Sleep** | Last night vs your usual, every night labelled restorative / low battery / low deep sleep, what was different on long nights that didn't restore you, deep sleep by bedtime, problems by cycle phase | Suggestions that only appear when your own data shows the pattern |
 | **Cycle** | Nightly skin temperature vs baseline, period starts, detected ovulation, table of past cycles | Next period, ovulation, fertile window |
-| **Cardio & VO2max** | Cardio sessions, heart rate, VO2max readings | — |
+| **Cardio & VO2max** | Cardio sessions with minutes per HR zone, time in each zone per week / month vs the WHO health target and the 80/20 easy-hard split, Garmin's all-day intensity minutes, VO2max readings | — |
+| **Heart-rate zones** | Your Garmin zones vs your real resting HR and highest HR, zones by method (%max, %HRR, %LTHR), what to change in Garmin, cardio sessions vs zone 2 | Your zone 2 - from formulas, or from a talk / threshold / max-HR test you enter |
 
 The **Today** date picker in the sidebar lets you look at any day of the plan.
 
@@ -109,8 +111,12 @@ The example plan in [`girlgarmin/plans/example_plan.py`](girlgarmin/plans/exampl
 |---|---|---|---|---|---|---|
 | Glutes | Upper A (shoulders) + VO2max intervals | Zone-2 walk | Legs | Zone-2 walk | Upper B (shoulders + glutes) + walk | Rest |
 
-- **Double progression**: add 1 rep per set each week. When you reach the top of the rep range,
-  the weight goes up and the reps drop back to the bottom. Week 8 is a lighter week.
+- **Double progression, based on what you actually lifted**: each target comes from the last time
+  you logged that exercise (see [`girlgarmin/progression.py`](girlgarmin/progression.py)). When every
+  set reached the top of the rep range, the weight goes up and the reps drop back to the bottom;
+  otherwise you aim for one rep more than your weakest set. Weeks further ahead are projected at
+  +1 rep per week and recalculated after every sync. Week 8 is a lighter week (`DELOAD_WEEKS`).
+  Lifts sometimes logged under another Garmin name can list it in `aliases`.
 - **RIR** (reps in reserve) tells you how close to failure to go: RIR 1-2 = stop when you could
   still do 1-2 more clean reps.
 - The plan **starts on the Monday saved in `data/plan_start.txt`**. That file is created the first
@@ -123,11 +129,15 @@ The example plan in [`girlgarmin/plans/example_plan.py`](girlgarmin/plans/exampl
    uses `my_plan.py` when it exists (see [`girlgarmin/plan.py`](girlgarmin/plan.py)), and it's
    git-ignored, so your numbers stay private.
 2. In `my_plan.py`, change each exercise's `start_kg` to a weight you can lift for the starting
-   reps. The example weights are only a starting point, and week 1 is marked "adjust".
-3. Swap exercises, sets or days if you like. `garmin_category` / `garmin_name` are Garmin's
+   reps. They are only used until you have logged the exercise once, and are marked "first time -
+   adjust" until then.
+3. To make the plan longer, raise `WEEKS`, add lighter weeks to `DELOAD_WEEKS` and give every week
+   an entry in `INTERVALS`.
+4. Swap exercises, sets or days if you like. `garmin_category` / `garmin_name` are Garmin's
    exercise IDs. Copy them from an existing exercise, or look at a workout you logged on the watch
    (`data/raw/exercise_sets/`).
-4. Optional: change the weight-loss pace band (`TARGET_LOSS_KG_PER_WEEK`) in `girlgarmin/analysis.py`.
+5. Optional: change the weight-loss pace (`TARGET_LOSS_PCT_PER_WEEK`, % of your bodyweight per week) in
+   `girlgarmin/analysis.py`. It is only used if you pick **Lose weight** on the Body & diet tab.
 
 ### Put the plan on your watch (optional)
 
@@ -136,7 +146,13 @@ python -m girlgarmin.workouts --test     # try it: uploads 2 workouts, prints th
 python -m girlgarmin.workouts            # upload + schedule all 8 weeks on your Garmin calendar
 python -m girlgarmin.workouts --delete   # remove them again (do this before uploading a changed plan)
 python -m girlgarmin.workouts --replace-strength   # after editing exercises/loads: re-upload strength from today
+python -m girlgarmin.workouts --refresh  # re-upload the next 7 days with targets from your latest logs
+python -m girlgarmin.workouts --extend   # after adding weeks: upload the days after the last one on your calendar
 ```
+
+Once the plan is uploaded, every sync (the dashboard button or `girlgarmin.sync`) also runs
+`--refresh`, so the coming week's workouts on your watch follow what you just lifted. Use
+`python -m girlgarmin.sync --no-refresh` to skip it.
 
 Strength workouts show each exercise, reps and target weight on the watch. Warm-up and rest end
 when you press **lap**, not on a timer. Cardio workouts use your Garmin heart-rate zones.
@@ -163,6 +179,7 @@ GirlGarmin/
 │   ├── sync.py               # downloads new data -> data/ (incremental, safe to re-run)
 │   ├── workouts.py           # uploads / schedules the plan on Garmin Connect, and removes it again
 │   ├── analysis.py           # all calculations and predictions (pure pandas)
+│   ├── progression.py        # next targets from what you logged last time
 │   ├── plan.py               # picks plans/my_plan.py if it exists, else plans/example_plan.py
 │   ├── paths.py              # where data and login tokens live
 │   └── plans/

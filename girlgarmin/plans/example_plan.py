@@ -15,9 +15,11 @@ MAKE IT YOURS
 Split: Mon Glutes, Tue Upper A, Thu Legs, Sat Upper B (glute + shoulder priority), with
 cardio on the days in between. Never more than two training days in a row.
 
-Progression (double progression, pre-planned): each week add 1 rep per set; once the top of the
-rep range is reached, the next week adds the load increment and drops back to the bottom of the
-range. Week 8 is a lighter week (2/3 of the sets, week-7 load, bottom of the range).
+Progression (double progression): add 1 rep per set each week; once every set reaches the top of
+the rep range, add the load increment and drop back to the bottom of the range. Targets on the
+watch and dashboard come from what you actually logged last time (girlgarmin/progression.py);
+the numbers below are only used until an exercise has been logged. Lighter weeks
+(DELOAD_WEEKS) use 2/3 of the sets, the bottom of the range and the previous week's load.
 Rule in the gym: if you can't hit the prescribed reps at the prescribed RIR, repeat last week's
 numbers instead.
 """
@@ -45,7 +47,7 @@ def _plan_start() -> date:
 START = _plan_start()  # Monday of week 1
 FIRST_DAY = START  # first day anything is scheduled (can be later than START if you join mid-week)
 WEEKS = 8
-DELOAD_WEEK = 8  # lighter last week
+DELOAD_WEEKS = {8}  # lighter weeks
 
 
 @dataclass
@@ -65,6 +67,7 @@ class Ex:
     per_leg: bool = False   # reps are per leg / per arm
     estimate: bool = True   # starting load is a guess - flagged "adjust" in week 1
     logged_both_sides: bool = False  # per-leg exercise you log in Garmin as the total of both legs
+    aliases: tuple[str, ...] = ()  # other Garmin names you sometimes log this exercise under
     note: str = ""
 
 
@@ -130,17 +133,20 @@ OUTDOOR_TEST = ("Easy 25-30 min OUTDOOR run or brisk walk with GPS - most Garmin
 
 
 def prescription(ex: Ex, week: int) -> tuple[int, int, float | None]:
-    """(sets, reps, kg) for an exercise in a given week, following double progression."""
-    w = min(week, DELOAD_WEEK - 1)
+    """(sets, reps, kg) for an exercise in a given week, following double progression from the
+    starting numbers (one step per week, lighter weeks don't count)."""
+    base = week
+    while base in DELOAD_WEEKS and base > 1:
+        base -= 1
     reps, kg = ex.start_reps, ex.start_kg
-    for _ in range(w - 1):
+    for _ in [w for w in range(2, base + 1) if w not in DELOAD_WEEKS]:
         if reps < ex.rep_hi:
             reps += 1
         else:
             reps = ex.rep_lo
             kg = kg + ex.inc_kg if kg is not None else None
     sets = ex.sets
-    if week == DELOAD_WEEK:
+    if week in DELOAD_WEEKS:
         sets, reps = max(1, round(ex.sets * 2 / 3)), ex.rep_lo
     return sets, reps, kg
 
@@ -169,7 +175,7 @@ TEMPLATE = {
 # week 1 and the last week so you can compare the two readings.
 OVERRIDES = {
     1: {4: (None, "vo2check")},
-    DELOAD_WEEK: {4: (None, "vo2check")},
+    WEEKS: {4: (None, "vo2check")},
 }
 
 
