@@ -51,3 +51,43 @@ export const KeyIcon = ({ color, size = 18 }: IconProps) => (
     <Path d="M11 11l8-8M16 6l2.5 2.5M14 8l2 2" {...stroke(color)} />
   </Icon>
 );
+
+export const InfoIcon = ({ color, size = 18 }: IconProps) => (
+  <Icon size={size}>
+    <Circle cx={12} cy={12} r={9} {...stroke(color)} />
+    <Path d="M12 11v5.5M12 7.6v.1" {...stroke(color)} strokeWidth={2.2} />
+  </Icon>
+);
+
+// bottom tab bar
+export const TodayIcon = ({ color, size }: IconProps) => (
+  <Icon size={size}>
+    <Circle cx={12} cy={12} r={4} {...stroke(color)} />
+    <Path d="M12 2.5v2M12 19.5v2M2.5 12h2M19.5 12h2M5.3 5.3l1.4 1.4M17.3 17.3l1.4 1.4M5.3 18.7l1.4-1.4M17.3 6.7l1.4-1.4" {...stroke(color)} />
+  </Icon>
+);
+
+export const TrainingIcon = ({ color, size }: IconProps) => (
+  <Icon size={size}>
+    <Path d="M6.5 7v10M17.5 7v10M3.5 9.5v5M20.5 9.5v5M6.5 12h11" {...stroke(color)} strokeWidth={2} />
+  </Icon>
+);
+
+export const RecoveryIcon = ({ color, size }: IconProps) => (
+  <Icon size={size}>
+    <Path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z" {...stroke(color)} />
+  </Icon>
+);
+
+export const CycleIcon = ({ color, size }: IconProps) => (
+  <Icon size={size}>
+    <Path d="M12 3.5c3 3.6 5.5 6.6 5.5 10a5.5 5.5 0 0 1-11 0c0-3.4 2.5-6.4 5.5-10z" {...stroke(color)} />
+  </Icon>
+);
+
+export const BodyIcon = ({ color, size }: IconProps) => (
+  <Icon size={size}>
+    <Circle cx={12} cy={7.5} r={3.5} {...stroke(color)} />
+    <Path d="M5 20.5v-1.5a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1.5" {...stroke(color)} />
+  </Icon>
+);

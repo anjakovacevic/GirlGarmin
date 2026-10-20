@@ -20,4 +20,8 @@ export interface Ctx {
   /** Every saved plan (Plan tab); saving re-applies the schedule and reloads the app. */
   plans: PlanData[];
   savePlans: (plans: PlanData[]) => Promise<void>;
+  /** Open a full-screen page reached from a tab (Plan and Heart-rate zones, from Training). */
+  open: (page: Page) => void;
 }
+
+export type Page = 'plan' | 'zones';

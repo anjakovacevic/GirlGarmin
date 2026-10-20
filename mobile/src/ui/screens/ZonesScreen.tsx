@@ -4,7 +4,7 @@ import * as A from '../../analysis';
 import { fmtDate, timeX, toDays } from '../../lib/dates';
 import { fmt, isNum, max } from '../../lib/stats';
 import { Chart } from '../Chart';
-import { Bullets, Caption, Expander, Metric, MetricGrid, Notice, NumberField, Rich, Section, Table } from '../components';
+import { Bullets, Caption, Expander, KeyValue, ListRow, Metric, MetricGrid, Notice, NumberField, Rich, Section } from '../components';
 import type { Ctx } from '../context';
 import { inRange, rangeStart } from '../range';
 import { colorFor } from '../theme';
@@ -57,21 +57,23 @@ export function ZonesScreen({ c }: { c: Ctx }) {
         <Caption>Zone 2 based on: {adv.zone2Basis}.</Caption>
       </Section>
 
-      <Section title="What to change in Garmin">
+      <Section
+        title="What to change in Garmin"
+        info="Garmin Connect app: profile picture -> Settings -> User Settings -> Heart Rate Zones. On the watch: Settings -> User Profile -> Heart Rate."
+      >
         {adv.tips.length ? <Bullets items={adv.tips} /> : <Notice tone="success" text="Your Garmin zone settings match your data." />}
-        <Caption>
-          Garmin Connect app: profile picture -&gt; Settings -&gt; User Settings -&gt; Heart Rate Zones (or on the watch: Settings -&gt;
-          User Profile -&gt; Heart Rate).
-        </Caption>
       </Section>
 
-      <Section title="Zones by method (bpm)">
-        <Table columns={['Method', 'Zone 1', 'Zone 2', 'Zone 3', 'Zone 4', 'Zone 5']} rows={adv.table.map((r) => [r.method, ...r.zones])} />
-        <Caption>Different methods give different numbers because they start from different guesses. Your own test results beat any formula.</Caption>
+      <Section title="Zones by method" info="Different methods give different numbers because they start from different guesses. Your own test results beat any formula.">
+        {adv.table.map((r) => (
+          <ListRow key={r.method} title={r.method} sub={`Zone 2: ${r.zones[1]} bpm`}>
+            {r.zones.map((z, i) => <KeyValue key={i} label={`Zone ${i + 1}`} value={`${z} bpm`} />)}
+          </ListRow>
+        ))}
       </Section>
 
       {allRuns.length ? (
-        <Section title="Average HR of your cardio sessions vs estimated zone 2">
+        <Section title="Your cardio vs zone 2" info="Average heart rate of each cardio session, against your estimated zone 2 (green band). If easy sessions where you could chat sit above the band, your zones are set too low.">
           <Chart
             height={260}
             yTitle="average HR (bpm)"
@@ -88,7 +90,6 @@ export function ZonesScreen({ c }: { c: Ctx }) {
               })),
             }]}
           />
-          <Caption>If easy sessions where you could chat sit above the green band, your zones are set too low.</Caption>
         </Section>
       ) : null}
 

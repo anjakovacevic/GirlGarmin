@@ -390,11 +390,15 @@ export interface Recovery {
 }
 
 /** Plan's recovery rule, cycle-aware: Low HRV in the luteal phase is normal and not a reason to cut sets. */
-export function recoveryToday(daily: DailyRow[], phase: Map<ISODate, Phase>): Recovery | null {
-  if (!daily.length) return null;
-  const last = [...daily].sort((a, b) => a.date.localeCompare(b.date))[daily.length - 1];
+export function recoveryToday(daily: DailyRow[], phase: Map<ISODate, Phase>, day = todayISO()): Recovery | null {
+  if (!daily.length || day > todayISO()) return null; // no recovery for days that haven't happened
+  const sorted = [...daily].sort((a, b) => a.date.localeCompare(b.date));
+  // that day's row (it holds the night before); today falls back to the latest night synced
+  const last = sorted.find((d) => d.date === day) ?? (day === todayISO() ? sorted[sorted.length - 1] : null);
+  if (!last) return null;
   const ph = phase.get(last.date) ?? null;
-  const samePhase = ph ? daily.filter((d) => phase.get(d.date) === ph) : daily;
+  const upTo = sorted.filter((d) => d.date <= last.date); // the normal as it was then
+  const samePhase = ph ? upTo.filter((d) => phase.get(d.date) === ph) : upTo;
   const base = median(samePhase.map((d) => d.hrv_last_night));
   const low = last.hrv_status === 'LOW';
   const poorSleep = isNum(last.sleep_score) && last.sleep_score < 70;

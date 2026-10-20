@@ -3,7 +3,7 @@
 import { createContext, type ReactNode, useContext, useState } from 'react';
 import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 
-import { CheckIcon, ChevronIcon } from './icons';
+import { CheckIcon, ChevronIcon, InfoIcon } from './icons';
 import { useTheme } from './theme';
 
 /** True inside a white card: tiles and controls there are filled grey; on the grey page, white. */
@@ -14,20 +14,109 @@ function useFill() {
   return useContext(InCard) ? t.surface : t.card;
 }
 
-export function Section({ title, children, right }: { title?: string; children: ReactNode; right?: ReactNode }) {
+/** A white card. `info` puts an "i" next to the title that opens the longer explanation, so the
+ * card itself can stay short (paragraphs separated by a blank line, **bold** works). */
+export function Section({ title, children, right, info }: { title?: string; children: ReactNode; right?: ReactNode; info?: string }) {
   const t = useTheme();
   return (
     <InCard.Provider value>
     <View style={[s.card, { backgroundColor: t.card }]}>
-      {title || right ? (
-        <View style={s.row}>
-          {title ? <Text style={[s.h2, { color: t.text }]}>{title}</Text> : null}
+      {title || right || info ? (
+        <View style={[s.row, { gap: 8 }]}>
+          {title ? <Text style={[s.h2, { color: t.text, flex: 1 }]}>{title}</Text> : <View style={{ flex: 1 }} />}
           {right}
+          {info ? <InfoButton title={title ?? 'About this'} text={info} /> : null}
         </View>
       ) : null}
       {children}
     </View>
     </InCard.Provider>
+  );
+}
+
+/** Small "i" that opens an explanation sheet. */
+export function InfoButton({ title, text }: { title: string; text: string }) {
+  const t = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <Pressable onPress={() => setOpen(true)} hitSlop={10} accessibilityRole="button" accessibilityLabel={`About: ${title}`}>
+        <InfoIcon color={t.muted} />
+      </Pressable>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={s.infoBackdrop} onPress={() => setOpen(false)}>
+          <Pressable style={[s.infoSheet, { backgroundColor: t.card }]} onPress={() => {}}>
+            <Text style={[s.h2, { color: t.text }]}>{title}</Text>
+            <ScrollView style={{ maxHeight: 420 }} contentContainerStyle={{ gap: 10 }}>
+              {text.split(/\n\s*\n/).map((para, i) => <Rich key={i} text={para} />)}
+            </ScrollView>
+            <Button kind="secondary" title="Close" onPress={() => setOpen(false)} />
+          </Pressable>
+        </Pressable>
+      </Modal>
+    </>
+  );
+}
+
+/** A tappable white row that opens another page (Plan, Heart-rate zones). */
+export function LinkCard({ title, sub, onPress }: { title: string; sub?: string; onPress: () => void }) {
+  const t = useTheme();
+  return (
+    <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => [s.card, s.row, { backgroundColor: t.card, opacity: pressed ? 0.8 : 1, gap: 12 }]}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={[s.h2, { color: t.text }]}>{title}</Text>
+        {sub ? <Text style={{ color: t.muted, fontSize: 13.5 }}>{sub}</Text> : null}
+      </View>
+      <ChevronIcon color={t.muted} dir="right" />
+    </Pressable>
+  );
+}
+
+/** A list row that opens to show more when tapped (instead of a wide table). */
+export function ListRow({ title, sub, right, children }: { title: string; sub?: string; right?: ReactNode; children?: ReactNode }) {
+  const t = useTheme();
+  const [open, setOpen] = useState(false);
+  const head = (
+    <View style={[s.row, { gap: 10 }]}>
+      <View style={{ flex: 1, gap: 2 }}>
+        <Text style={{ color: t.text, fontSize: 15, fontWeight: '600' }}>{title}</Text>
+        {sub ? <Text style={{ color: t.muted, fontSize: 13 }}>{sub}</Text> : null}
+      </View>
+      {right}
+      {children ? <ChevronIcon color={t.muted} dir={open ? 'up' : 'down'} size={16} /> : null}
+    </View>
+  );
+  return (
+    <View style={[s.listRow, { borderTopColor: t.border }]}>
+      {children ? (
+        <Pressable onPress={() => setOpen(!open)} accessibilityRole="button" accessibilityState={{ expanded: open }}>{head}</Pressable>
+      ) : head}
+      {open ? <View style={{ gap: 6, paddingTop: 8 }}>{children}</View> : null}
+    </View>
+  );
+}
+
+/** The first `limit` items, with a "Show all" button for the rest. */
+export function ShowMore<T>({ items, limit, render }: { items: T[]; limit: number; render: (x: T, i: number) => ReactNode }) {
+  const [all, setAll] = useState(false);
+  return (
+    <>
+      {(all ? items : items.slice(0, limit)).map(render)}
+      {items.length > limit ? (
+        <Button kind="secondary" title={all ? 'Show fewer' : `Show all ${items.length}`} onPress={() => setAll(!all)} />
+      ) : null}
+    </>
+  );
+}
+
+/** "Label   value" line inside an opened list row. */
+export function KeyValue({ label, value }: { label: string; value: string }) {
+  const t = useTheme();
+  return (
+    <View style={[s.row, { gap: 12 }]}>
+      <Text style={{ color: t.muted, fontSize: 13.5, flex: 1 }}>{label}</Text>
+      <Text style={{ color: t.text, fontSize: 13.5, fontWeight: '600', fontVariant: ['tabular-nums'] }}>{value}</Text>
+    </View>
   );
 }
 
@@ -342,6 +431,9 @@ export const s = StyleSheet.create({
   expander: { borderTopWidth: StyleSheet.hairlineWidth },
   button: { borderRadius: 999, borderWidth: 1, paddingVertical: 13, paddingHorizontal: 20, alignItems: 'center' },
   select: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14 },
+  listRow: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 12 },
+  infoBackdrop: { flex: 1, backgroundColor: 'rgba(29,27,34,0.35)', justifyContent: 'flex-end' },
+  infoSheet: { borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, paddingBottom: 32, gap: 14 },
   backdrop: { flex: 1, backgroundColor: 'rgba(29,27,34,0.35)', justifyContent: 'center', padding: 24 },
   sheet: { borderRadius: 20, maxHeight: '75%', paddingVertical: 6 },
   option: { paddingVertical: 14, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth },

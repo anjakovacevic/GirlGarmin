@@ -1,12 +1,15 @@
+/** Today tab: how recovered you are (the verdict first), what's planned, this week at a glance, and
+ * where you are in your cycle. The date picker above it lives in App. */
+
 import { useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import * as A from '../../analysis';
-import { addDays, fmtDate, fmtShort, mondayOf } from '../../lib/dates';
+import { addDays, fmtShort, mondayOf, WEEKDAYS } from '../../lib/dates';
 import { fmt, fmtG, fmtSigned, isNum } from '../../lib/stats';
 import { allDays, type CardioKind } from '../../plan';
 import * as progression from '../../progression';
-import { Caption, Metric, MetricGrid, Notice, Section } from '../components';
+import { Caption, Section } from '../components';
 import type { Ctx } from '../context';
 import { CheckIcon, ChevronIcon } from '../icons';
 import { useTheme } from '../theme';
@@ -18,72 +21,52 @@ function cardioLabel(kind: CardioKind): string {
   return '';
 }
 
+const WEEK_INFO = `**✓** session done (even on another day of the week) · **red ring** session missed · **grey dot** session still to come · **small green dot** cardio logged.
+
+The 30-minute zone-2 walks are optional, so they never count as missed.`;
+
 export function TodayScreen({ c }: { c: Ctx }) {
   const t = useTheme();
   const { d, today } = c;
   const day = A.todayPlan(today);
-  const rec = A.recoveryToday(d.daily, c.phases);
-  const wt = A.weightForecast(d.weight);
-  const lose = c.settings.goal === 'lose';
-  const lastW = d.weight.length ? d.weight[d.weight.length - 1] : null;
+  const rec = A.recoveryToday(d.daily, c.phases, today);
+  const [showWorkout, setShowWorkout] = useState(false);
 
   const weekStart = mondayOf(today);
-  const planWeek = allDays().filter((x) => x.date >= weekStart && x.date < addDays(weekStart, 7));
   const weekDays = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(weekStart, i));
+  const planWeek = allDays().filter((x) => x.date >= weekStart && x.date < addDays(weekStart, 7));
   // cycle day on the date shown: counted from the last period logged on or before it
   const cyc = A.predictCycle(c.info.filter((x) => x.start <= today), today);
   // lifting counts for the session it belongs to, even when done on another day of the week
   const doneOn = A.matchSessions(d.activities);
-  const lifted = new Set(planWeek.filter((x) => doneOn.has(x.date)).map((x) => x.date));
-  const movedHere = (date: string) => planWeek.filter((x) => doneOn.get(x.date)?.date === date && x.date !== date);
   const matched = new Set([...doneOn.values()]);
-  const extra = (date: string) =>
-    d.activities.some((a) => a.date === date && a.type === 'strength_training' && !matched.has(a)) && !planWeek.some((x) => doneOn.get(x.date)?.date === date);
-  const moved = new Set(d.activities.filter((a) => a.type !== 'strength_training').map((a) => a.date)); // any cardio activity
-  // done = check, missed = red ring, still to come (or optional) = dash
-  const tick = (planned: boolean, done: boolean, date: string, optional = false) =>
-    !planned ? null : done ? <CheckIcon color={t.good} size={18} />
-      : date > today || optional ? <Text style={{ color: t.muted }}>—</Text>
-      : <View style={[st.missed, { borderColor: t.bad }]} accessibilityLabel="missed" />;
-
+  const cardioDays = new Set(d.activities.filter((a) => a.type !== 'strength_training').map((a) => a.date));
+  const notes = [
+    ...planWeek.flatMap((x) => {
+      const a = doneOn.get(x.date);
+      return a && a.date !== x.date ? [`${x.session!.title} done ${WEEKDAYS[weekDays.indexOf(a.date)] ?? fmtShort(a.date)} instead of ${WEEKDAYS[weekDays.indexOf(x.date)]}`] : [];
+    }),
+    ...weekDays.filter((date) => d.activities.some((a) => a.date === date && a.type === 'strength_training' && !matched.has(a))
+      && !planWeek.some((x) => doneOn.get(x.date)?.date === date)).map((date) => `Extra lifting on ${WEEKDAYS[weekDays.indexOf(date)]}`),
+  ];
   const hist = progression.history(d.sets, d.activities);
-  const [showWorkout, setShowWorkout] = useState(false);
+
+  const low = rec?.hrvStatus === 'LOW';
+  const hrvDiff = rec && isNum(rec.hrv) && isNum(rec.phaseBaseline) ? rec.hrv - rec.phaseBaseline : null;
 
   return (
-    <View style={{ gap: 12 }}>
-      <MetricGrid>
-        {day ? (
-          <Metric
-            label="Plan"
-            value={day.session ? day.session.title : day.cardio.includes('Rest') ? 'Rest' : 'Cardio'}
-            delta={`${day.planName}, week ${day.week} of ${day.planWeeks}`}
-            deltaColor="off"
-          />
-        ) : (
-          <Metric label="Plan" value="No plan selected" />
-        )}
-        {rec ? (
-          <Metric
-            label="HRV last night"
-            value={isNum(rec.hrv) ? `${fmt(rec.hrv)} ms` : '-'}
-            delta={isNum(rec.hrv) && isNum(rec.phaseBaseline) ? `${fmtSigned(rec.hrv - rec.phaseBaseline)} vs your ${rec.phase ?? ''} normal` : null}
-          />
-        ) : null}
-        {cyc ? <Metric label="Cycle day" value={cyc.cycleDay} delta={cyc.phase} deltaColor="off" /> : null}
-        {lastW ? (
-          <Metric
-            label="Weight"
-            value={`${fmt(lastW.weight_kg, 1)} kg`}
-            delta={wt ? `${fmtSigned(wt.perWeek, 2)} kg/week trend` : null}
-            deltaColor={lose ? 'inverse' : 'off'}
-          />
-        ) : null}
-      </MetricGrid>
-
+    <View style={{ gap: 14 }}>
       {rec ? (
-        <Notice
-          text={`**Recovery:** ${rec.advice}\nHRV status ${rec.hrvStatus || '-'} · sleep score ${fmt(rec.sleepScore)} · resting HR ${fmt(rec.restingHr)} (${fmtShort(rec.date)})`}
-        />
+        <View style={[st.hero, { backgroundColor: t.card }]} accessibilityRole="summary">
+          <Text style={[st.kicker, { color: low ? t.bad : t.good }]}>{low ? 'Recovery: take it easier' : 'Recovery: ready to train'}</Text>
+          <Text style={[st.verdict, { color: t.text }]}>{rec.advice}</Text>
+          <View style={st.stats}>
+            <Stat label="HRV" value={isNum(rec.hrv) ? `${fmt(rec.hrv)} ms` : '-'} sub={isNum(hrvDiff) ? `${fmtSigned(hrvDiff)} vs normal` : rec.hrvStatus || ''} />
+            <Stat label="Sleep score" value={fmt(rec.sleepScore)} />
+            <Stat label="Resting HR" value={isNum(rec.restingHr) ? `${fmt(rec.restingHr)}` : '-'} />
+          </View>
+          <Text style={{ color: t.muted, fontSize: 12 }}>From last night ({fmtShort(rec.date)})</Text>
+        </View>
       ) : null}
 
       {day?.session ? (
@@ -96,9 +79,10 @@ export function TodayScreen({ c }: { c: Ctx }) {
             accessibilityHint={showWorkout ? 'Hides the exercises' : 'Shows the exercises'}
           >
             <View style={{ flex: 1, gap: 2 }}>
+              <Text style={{ color: t.muted, fontSize: 13 }}>Today's workout</Text>
               <Text style={[st.workoutTitle, { color: t.text }]}>{day.session.title}</Text>
               <Text style={{ color: t.muted, fontSize: 13.5 }}>
-                {day.session.exercises.length} exercises{day.cardio ? ' + cardio' : ''} · {showWorkout ? 'tap to hide' : 'tap to see them'}
+                {day.session.exercises.length} exercises{day.cardio ? ' + cardio' : ''} · {day.planName}, week {day.week}
               </Text>
             </View>
             <View style={[st.chevron, { backgroundColor: t.surface }]}>
@@ -106,115 +90,106 @@ export function TodayScreen({ c }: { c: Ctx }) {
             </View>
           </Pressable>
           {showWorkout ? (
-          <>
-          <Caption>Warm-up: {day.session.warmup}</Caption>
-          {day.session.exercises.map((ex) => {
-            const tg = progression.target(ex, day.session!, today, hist, today);
-            const unit = ex.perLeg ? (ex.note.toLowerCase().includes('arm') ? ' /arm' : ' /leg') : '';
-            const first = tg.basedOn === null && ex.startKg !== null;
-            return (
-              <View key={ex.name} style={[st.ex, { borderTopColor: t.border }]}>
-                <View style={st.exHead}>
-                  <Text style={[st.exName, { color: t.text }]}>{ex.name}</Text>
-                  <Text style={[st.exLoad, { color: t.accent }]}>{tg.kg !== null ? `${fmtG(tg.kg)} kg` : 'bodyweight'}</Text>
-                </View>
-                <Text style={{ color: t.text, fontSize: 15 }}>
-                  {tg.sets} × {tg.reps}{unit} · RIR {ex.rir}
-                  <Text style={{ color: t.muted }}>  · {tg.basedOn ? `based on ${fmtShort(tg.basedOn)}` : 'plan'}</Text>
-                </Text>
-                {ex.note || first ? (
-                  <Caption>{ex.note}{first ? ' First time - the load is a guess, adjust it.' : ''}</Caption>
-                ) : null}
-              </View>
-            );
-          })}
-          {day.cardio ? <Caption>After lifting: {day.cardio}</Caption> : null}
-          </>
+            <>
+              <Caption>Warm-up: {day.session.warmup}</Caption>
+              {day.session.exercises.map((ex) => {
+                const tg = progression.target(ex, day.session!, today, hist, today);
+                const unit = ex.perLeg ? (ex.note.toLowerCase().includes('arm') ? ' /arm' : ' /leg') : '';
+                const first = tg.basedOn === null && ex.startKg !== null;
+                return (
+                  <View key={ex.name} style={[st.ex, { borderTopColor: t.border }]}>
+                    <View style={st.exHead}>
+                      <Text style={[st.exName, { color: t.text }]}>{ex.name}</Text>
+                      <Text style={[st.exLoad, { color: t.accent }]}>{tg.kg !== null ? `${fmtG(tg.kg)} kg` : 'bodyweight'}</Text>
+                    </View>
+                    <Text style={{ color: t.text, fontSize: 15 }}>
+                      {tg.sets} × {tg.reps}{unit} · {ex.rir} reps left in the tank
+                    </Text>
+                    {ex.note || first ? <Caption>{ex.note}{first ? ' First time - the weight is a guess, adjust it.' : ''}</Caption> : null}
+                  </View>
+                );
+              })}
+              {day.cardio ? <Caption>After lifting: {day.cardio}</Caption> : null}
+            </>
           ) : null}
         </Section>
       ) : day ? (
-        <Section title={fmtDate(today, { weekday: 'long' })}>
-          <Text style={{ color: t.text, fontSize: 15, lineHeight: 21 }}>{day.cardio}</Text>
+        <Section>
+          <Text style={{ color: t.muted, fontSize: 13 }}>Today</Text>
+          <Text style={[st.workoutTitle, { color: t.text }]}>{cardioLabel(day.cardioKind) || 'Rest day'}</Text>
+          <Text style={{ color: t.text, fontSize: 14.5, lineHeight: 21 }}>{day.cardio}</Text>
         </Section>
       ) : null}
 
-      {planWeek.length ? (
-        <Section title="This week">
-          <View style={[st.weekRow, { borderBottomColor: t.border }]}>
-            <Text style={[st.wDay, st.wHead, { color: t.muted }]}>Day</Text>
-            <Text style={[st.wPlan, st.wHead, { color: t.muted }]}>Plan</Text>
-            <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Lift</Text>
-            <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Cardio</Text>
-          </View>
-          {planWeek.map((x) => {
-            const cardio = cardioLabel(x.cardioKind);
-            const isToday = x.date === today;
-            const done = doneOn.get(x.date);
-            return (
-              <View key={x.date} style={[st.weekRow, { borderBottomColor: t.border }, isToday && [st.todayRow, { backgroundColor: t.accentSoft }]]}>
-                <Text style={[st.wDay, { color: t.text, fontWeight: isToday ? '700' : '400' }]}>{fmtDate(x.date)}</Text>
-                <View style={st.wPlan}>
-                  <Text style={{ color: t.text, fontSize: 13.5 }}>
-                    {[x.session?.title, cardio || (!x.session ? 'Rest' : '')].filter(Boolean).join(' + ')}
-                  </Text>
-                  {done && done.date !== x.date ? (
-                    <Text style={[st.wNote, { color: t.muted }]}>Done {done.date < x.date ? 'early' : 'late'}, on {fmtDate(done.date)}</Text>
-                  ) : null}
-                  {movedHere(x.date).map((m) => (
-                    <Text key={m.date} style={[st.wNote, { color: t.good }]}>Did {m.session!.title} here (planned {fmtDate(m.date)})</Text>
-                  ))}
-                  {extra(x.date) ? <Text style={[st.wNote, { color: t.good }]}>Extra lifting session</Text> : null}
-                </View>
-                <View style={st.wTick}>{tick(!!x.session, lifted.has(x.date), x.date)}</View>
-                <View style={st.wTick}>{tick(!!cardio, moved.has(x.date), x.date, x.cardioKind === 'zone2-30')}</View>
-              </View>
-            );
-          })}
-          <Caption>
-            A session done on another day of the same week still counts; the row says when. Cardio counts as done when any
-            non-strength activity is recorded that day. The 30-min zone-2 walks are optional, so
-            a missed one shows —.
-          </Caption>
-        </Section>
-      ) : (
-        <Section title="This week">
-          <View style={[st.weekRow, { borderBottomColor: t.border }]}>
-            <Text style={[st.wDay, st.wHead, { color: t.muted, flex: 1 }]}>Day</Text>
-            <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Lift</Text>
-            <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Cardio</Text>
-          </View>
-          {weekDays.map((date) => {
+      <Section title="This week" info={WEEK_INFO}>
+        <View style={st.strip}>
+          {weekDays.map((date, i) => {
+            const p = planWeek.find((x) => x.date === date);
             const isToday = date === today;
-            const acts = d.activities.filter((a) => a.date === date);
+            const lifted = p?.session ? doneOn.has(date) : d.activities.some((a) => a.date === date && a.type === 'strength_training');
+            let mark = null;
+            if (p?.session) {
+              mark = lifted ? <CheckIcon color={t.good} size={16} />
+                : date >= today ? <View style={[st.dot, { backgroundColor: t.border }]} />
+                : <View style={[st.ring, { borderColor: t.bad }]} accessibilityLabel="missed" />;
+            } else if (lifted) mark = <CheckIcon color={t.good} size={16} />;
             return (
-              <View key={date} style={[st.weekRow, { borderBottomColor: t.border }, isToday && [st.todayRow, { backgroundColor: t.accentSoft }]]}>
-                <Text style={[st.wDay, { color: t.text, flex: 1, fontWeight: isToday ? '700' : '400' }]}>{fmtDate(date)}</Text>
-                <View style={st.wTick}>{acts.some((a) => a.type === 'strength_training') ? <CheckIcon color={t.good} size={18} /> : null}</View>
-                <View style={st.wTick}>{acts.some((a) => a.type !== 'strength_training') ? <CheckIcon color={t.good} size={18} /> : null}</View>
+              <View key={date} style={st.day} accessibilityLabel={`${WEEKDAYS[i]}${p?.session ? `, ${p.session.title}` : ''}${lifted ? ', done' : ''}`}>
+                <Text style={{ color: t.muted, fontSize: 12 }}>{WEEKDAYS[i][0]}</Text>
+                <View style={[st.date, isToday && { backgroundColor: t.accentSoft }]}>
+                  <Text style={{ color: isToday ? t.accent : t.text, fontWeight: isToday ? '700' : '500', fontSize: 14 }}>{+date.slice(8)}</Text>
+                </View>
+                <View style={st.mark}>{mark}</View>
+                <View style={[st.cardio, { backgroundColor: cardioDays.has(date) ? t.good : 'transparent' }]} />
               </View>
             );
           })}
-          <Caption>No training plan this week, so this shows the activities you logged.</Caption>
+        </View>
+        {notes.map((n) => <Text key={n} style={{ color: t.muted, fontSize: 13 }}>{n}</Text>)}
+        {!planWeek.length ? <Caption>No plan this week - showing what you logged.</Caption> : null}
+      </Section>
+
+      {cyc ? (
+        <Section>
+          <Text style={{ color: t.text, fontSize: 15 }}>
+            <Text style={{ fontWeight: '700' }}>Cycle day {cyc.cycleDay}</Text>
+            <Text style={{ color: t.muted }}> · {cyc.phase}</Text>
+          </Text>
         </Section>
-      )}
+      ) : null}
+    </View>
+  );
+}
+
+function Stat({ label, value, sub }: { label: string; value: string; sub?: string }) {
+  const t = useTheme();
+  return (
+    <View style={[st.stat, { backgroundColor: t.surface }]}>
+      <Text style={{ color: t.muted, fontSize: 12.5 }}>{label}</Text>
+      <Text style={{ color: t.text, fontSize: 18, fontWeight: '700', fontVariant: ['tabular-nums'] }}>{value}</Text>
+      {sub ? <Text style={{ color: t.muted, fontSize: 11.5 }} numberOfLines={1}>{sub}</Text> : null}
     </View>
   );
 }
 
 const st = StyleSheet.create({
+  hero: { borderRadius: 20, padding: 18, gap: 10 },
+  kicker: { fontSize: 13, fontWeight: '700' },
+  verdict: { fontSize: 19, lineHeight: 26, fontWeight: '600', letterSpacing: -0.3 },
+  stats: { flexDirection: 'row', gap: 8 },
+  stat: { flex: 1, borderRadius: 14, paddingVertical: 10, paddingHorizontal: 12, gap: 1 },
   workoutHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  workoutTitle: { fontSize: 17, fontWeight: '700', letterSpacing: -0.2 },
+  workoutTitle: { fontSize: 18, fontWeight: '700', letterSpacing: -0.3 },
   chevron: { width: 36, height: 36, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   ex: { borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 10, gap: 3 },
   exHead: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   exName: { fontSize: 15.5, fontWeight: '700', flex: 1 },
   exLoad: { fontSize: 15.5, fontWeight: '700' },
-  weekRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, gap: 6 },
-  wHead: { fontSize: 12, fontWeight: '700' },
-  wDay: { width: 82, fontSize: 13.5 },
-  wPlan: { flex: 1, gap: 1 },
-  wNote: { fontSize: 12, lineHeight: 16 },
-  wTick: { width: 46, textAlign: 'center', alignItems: 'center', fontSize: 14 },
-  todayRow: { marginHorizontal: -8, paddingHorizontal: 8, borderRadius: 10, borderBottomWidth: 0 },
-  missed: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.8 },
+  strip: { flexDirection: 'row', justifyContent: 'space-between' },
+  day: { alignItems: 'center', gap: 6, flex: 1 },
+  date: { width: 32, height: 32, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+  mark: { height: 18, alignItems: 'center', justifyContent: 'center' },
+  dot: { width: 8, height: 8, borderRadius: 4 },
+  ring: { width: 12, height: 12, borderRadius: 6, borderWidth: 1.8 },
+  cardio: { width: 5, height: 5, borderRadius: 3 },
 });

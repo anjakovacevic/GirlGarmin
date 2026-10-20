@@ -3,8 +3,8 @@
  * storage; nothing goes anywhere else. */
 
 import { StatusBar } from 'expo-status-bar';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ActivityIndicator, AppState, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import * as A from './analysis';
@@ -20,20 +20,18 @@ import { sync, SyncCancelled } from './sync';
 import { buildTables, EMPTY, loadTables } from './tables';
 import * as workouts from './workouts';
 import { Button, Notice, Section, Segmented } from './ui/components';
-import type { Ctx } from './ui/context';
+import type { Ctx, Page } from './ui/context';
 import { type Job, JobSheet } from './ui/JobSheet';
 import { LoginScreen } from './ui/LoginScreen';
 import { BodyScreen } from './ui/screens/BodyScreen';
-import { CardioScreen } from './ui/screens/CardioScreen';
 import { CycleScreen } from './ui/screens/CycleScreen';
 import { RecoveryScreen } from './ui/screens/RecoveryScreen';
-import { SleepScreen } from './ui/screens/SleepScreen';
 import { PlanScreen } from './ui/screens/PlanScreen';
 import { TodayScreen } from './ui/screens/TodayScreen';
 import { TrainingScreen } from './ui/screens/TrainingScreen';
 import { ZonesScreen } from './ui/screens/ZonesScreen';
 import { SettingsSheet, type WatchAction } from './ui/SettingsSheet';
-import { ChevronIcon, GearIcon } from './ui/icons';
+import { BodyIcon, ChevronIcon, CycleIcon, GearIcon, RecoveryIcon, TodayIcon, TrainingIcon } from './ui/icons';
 import { type Range, RANGES } from './ui/range';
 import { useTheme } from './ui/theme';
 
@@ -49,9 +47,15 @@ const syncedText = (ms: number) =>
   `${new Date(ms).toDateString() === new Date().toDateString() ? 'today' : fmtDate(todayISO(new Date(ms)), { weekday: false })} at ${clock(ms)}`;
 
 const TABS = [
-  ['Daily', TodayScreen], ['Plan', PlanScreen], ['Training', TrainingScreen], ['Body & diet', BodyScreen], ['Recovery', RecoveryScreen],
-  ['Sleep', SleepScreen], ['Cycle', CycleScreen], ['Cardio & VO2max', CardioScreen], ['Heart-rate zones', ZonesScreen],
+  ['Today', TodayScreen, TodayIcon], ['Training', TrainingScreen, TrainingIcon], ['Recovery', RecoveryScreen, RecoveryIcon],
+  ['Cycle', CycleScreen, CycleIcon], ['Body', BodyScreen, BodyIcon],
 ] as const;
+
+/** Pages opened from a tab, full screen with a back button. */
+const PAGES: Record<Page, [string, (p: { c: Ctx }) => React.ReactNode]> = {
+  plan: ['Plan', PlanScreen],
+  zones: ['Heart-rate zones', ZonesScreen],
+};
 
 export default function App() {
   return (
@@ -71,6 +75,7 @@ function Main() {
   const [hrTests, setHrTestsState] = useState<A.HrTests>({});
   const [today, setToday] = useState(todayISO());
   const [tab, setTab] = useState(0);
+  const [page, setPage] = useState<Page | null>(null);
   const [range, setRange] = useState<Range>('Month');
   const [job, setJob] = useState<Job | null>(null);
   const [showSettings, setShowSettings] = useState(false);
@@ -108,7 +113,7 @@ function Main() {
     // pred is for the Cycle tab, which is always about today (the Daily tab works out its own date's cycle day)
     return {
       d: data, today, info, phases, pred: A.predictCycle(info, todayISO()), sessions: data.sets.length ? A.liftSessions(data.sets) : [],
-      settings, hrTests, range, plans,
+      settings, hrTests, range, plans, open: setPage,
       savePlans: async (next) => {
         await savePlans(next);
         await reload();
@@ -256,43 +261,22 @@ function Main() {
   }
 
   const Screen = TABS[tab][1];
-  const last = hasData ? ctx.d.daily[ctx.d.daily.length - 1].date : null;
-  const startsSoon = hasPlan() && todayISO() < P().firstDay;
   const isToday = today === todayISO();
+
+  // settings sit at the end of each tab's heading; a background sync shows a small spinner next to it
+  const settingsButton = (
+    <View style={st.settings}>
+      {quiet ? <ActivityIndicator color={t.accent} size="small" accessibilityLabel={quiet} /> : null}
+      <Pressable onPress={() => setShowSettings(true)} hitSlop={10} style={st.iconBtn} accessibilityLabel="Settings">
+        <GearIcon color={t.text} />
+      </Pressable>
+    </View>
+  );
 
   return (
     <View style={{ flex: 1, backgroundColor: t.bg }}>
       <StatusBar style="dark" />
-      <View style={[st.header, { paddingTop: insets.top + 6, backgroundColor: t.bg }]}>
-        <View style={st.titleRow}>
-          <Text style={[st.brand, { color: t.text }]}>GirlGarmin</Text>
-          {quiet ? (
-            <View style={st.syncing} accessibilityLiveRegion="polite">
-              <ActivityIndicator color={t.accent} size="small" />
-              <Text style={{ color: t.muted, fontSize: 13 }}>{quiet}</Text>
-            </View>
-          ) : null}
-          <Pressable onPress={() => setShowSettings(true)} hitSlop={10} style={st.iconBtn} accessibilityLabel="Settings">
-            <GearIcon color={t.text} />
-          </Pressable>
-        </View>
-
-        <Text style={[st.sub, { color: t.muted }]} numberOfLines={2}>
-          {lastSync ? `Synced ${syncedText(lastSync)}. ` : last ? `Data up to ${fmtDate(last, { weekday: false })}. ` : ''}{hasPlan() ? `${P().name}: ${fmtDate(P().firstDay, { weekday: false })} to ${fmtDate(P().end, { weekday: false, year: true })}` : 'No plan running'}
-          {startsSoon ? ' (starts soon)' : ''}
-        </Text>
-        {quietError ? <Text style={[st.sub, { color: t.bad }]} numberOfLines={2}>{quietError}</Text> : null}
-
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={st.tabs} style={[st.tabBar, { borderBottomColor: t.border }]}>
-          {TABS.map(([name], i) => (
-            <Pressable key={name} onPress={() => setTab(i)} style={[st.tab, { borderBottomColor: i === tab ? t.accent : 'transparent' }]}>
-              <Text style={{ color: i === tab ? t.text : t.muted, fontWeight: i === tab ? '700' : '500', fontSize: 14.5 }}>{name}</Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
-
-      <ScrollView key={tab} contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 40, gap: 14 }}>
+      <ScrollView key={tab} contentContainerStyle={{ padding: 16, paddingTop: insets.top + 12, paddingBottom: 32, gap: 14 }}>
         {tab === 0 ? (
           <View style={st.dayRow}>
             <Pressable onPress={() => setToday(todayISO())} style={{ flex: 1 }} accessibilityLabel="Go back to today">
@@ -309,10 +293,18 @@ function Main() {
             <Pressable onPress={() => setToday(addDays(today, 1))} hitSlop={8} style={[st.dayBtn, { backgroundColor: t.card }]} accessibilityLabel="Next day">
               <ChevronIcon color={t.text} dir="right" />
             </Pressable>
+            {settingsButton}
           </View>
-        ) : TABS[tab][0] !== 'Plan' ? (
-          <Segmented options={RANGES} value={range} onChange={setRange} stretch />
-        ) : null}
+        ) : (
+          <>
+            <View style={st.headRow}>
+              <Text style={[st.date, { color: t.text, flex: 1 }]}>{TABS[tab][0]}</Text>
+              {settingsButton}
+            </View>
+            <Segmented options={RANGES} value={range} onChange={setRange} stretch />
+          </>
+        )}
+        {quietError ? <Text style={[st.sub, { color: t.bad }]}>{quietError}</Text> : null}
         {hasData ? (
           <Screen c={ctx} />
         ) : (
@@ -322,6 +314,37 @@ function Main() {
           </Section>
         )}
       </ScrollView>
+
+      <View style={[st.bottomBar, { backgroundColor: t.card, borderTopColor: t.border, paddingBottom: insets.bottom + 6 }]} accessibilityRole="tablist">
+        {TABS.map(([name, , Icon], i) => {
+          const on = i === tab;
+          return (
+            <Pressable key={name} onPress={() => setTab(i)} style={st.bottomTab} accessibilityRole="tab" accessibilityState={{ selected: on }} accessibilityLabel={name}>
+              <View style={[st.tabPill, on && { backgroundColor: t.accentSoft }]}>
+                <Icon color={on ? t.accent : t.muted} size={22} />
+                <Text style={{ color: on ? t.accent : t.muted, fontSize: 11.5, fontWeight: on ? '700' : '500' }}>{name}</Text>
+              </View>
+            </Pressable>
+          );
+        })}
+      </View>
+
+      {page ? (
+        <Modal visible animationType="slide" onRequestClose={() => setPage(null)}>
+          <View style={{ flex: 1, backgroundColor: t.bg, paddingTop: insets.top }}>
+            <View style={st.pageBar}>
+              <Pressable onPress={() => setPage(null)} hitSlop={12} style={st.back} accessibilityRole="button" accessibilityLabel="Back">
+                <ChevronIcon color={t.accent} dir="left" />
+                <Text style={{ color: t.accent, fontSize: 16, fontWeight: '600' }}>Back</Text>
+              </Pressable>
+            </View>
+            <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: insets.bottom + 32, gap: 14 }}>
+              <Text style={[st.date, { color: t.text }]}>{PAGES[page][0]}</Text>
+              {React.createElement(PAGES[page][1], { c: ctx })}
+            </ScrollView>
+          </View>
+        </Modal>
+      ) : null}
 
       {showSettings ? (
         <SettingsSheet
@@ -374,17 +397,17 @@ function Main() {
 
 const st = StyleSheet.create({
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  header: { paddingHorizontal: 16, gap: 6 },
-  titleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  brand: { flex: 1, fontSize: 15, fontWeight: '700', letterSpacing: -0.2 },
-  syncing: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 6 },
-  iconBtn: { padding: 8 },
+  headRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  settings: { flexDirection: 'row', alignItems: 'center', gap: 2, marginBottom: 2 },
+  iconBtn: { padding: 8, marginRight: -8 },
   dayRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 2 },
   kicker: { fontSize: 13, fontWeight: '600' },
   date: { fontSize: 30, fontWeight: '700', letterSpacing: -0.8, marginTop: 1 },
   dayBtn: { borderRadius: 999, width: 40, height: 40, alignItems: 'center', justifyContent: 'center', marginBottom: 2 },
   sub: { fontSize: 12.5, lineHeight: 17 },
-  tabBar: { marginHorizontal: -16, borderBottomWidth: StyleSheet.hairlineWidth, flexGrow: 0 },
-  tabs: { gap: 20, paddingHorizontal: 16 },
-  tab: { paddingTop: 6, paddingBottom: 10, borderBottomWidth: 2 },
+  bottomBar: { flexDirection: 'row', borderTopWidth: StyleSheet.hairlineWidth, paddingTop: 6 },
+  bottomTab: { flex: 1, alignItems: 'center' },
+  tabPill: { minWidth: 64, paddingHorizontal: 8, paddingVertical: 6, borderRadius: 16, alignItems: 'center', gap: 2 },
+  pageBar: { paddingHorizontal: 12, paddingVertical: 8 },
+  back: { flexDirection: 'row', alignItems: 'center', gap: 2 },
 });

@@ -1,17 +1,40 @@
+/** Cardio, shown in the Training tab: activity minutes against your weekly goal, how easy or hard
+ * your cardio was, your sessions, and VO2max. */
+
 import { useMemo, useState } from 'react';
-import { View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
 
 import * as A from '../../analysis';
 import { addDays, fmtDate, timeX, toDays, todayISO } from '../../lib/dates';
 import { fmt, fmtSigned, isNum, max, mean, pct, sum } from '../../lib/stats';
 import { P } from '../../plan';
-import { Chart, type Series } from '../Chart';
-import { Bullets, Caption, Metric, MetricGrid, Notice, Section, Table, Toggle } from '../components';
+import type { Activity } from '../../tables';
+import { Chart } from '../Chart';
+import { KeyValue, LinkCard, ListRow, Metric, MetricGrid, Notice, Section, ShowMore, Toggle } from '../components';
 import type { Ctx } from '../context';
 import { barWidthFor, bucketed, bucketFor, inRange, rangeStart } from '../range';
 import { colorFor, useTheme } from '../theme';
 
-export function CardioScreen({ c }: { c: Ctx }) {
+const ZONES_INFO = `**Weekly goal (WHO):** ${A.WHO_WEEKLY_MIN[0]}-${A.WHO_WEEKLY_MIN[1]} minutes of moderate activity a week (zone 2-3), where a vigorous minute (zone 4-5) counts as two, plus strength training on 2+ days.
+
+The bars use Garmin's all-day intensity minutes when your watch records them - they also count brisk walking during the day, so they're the fairer comparison. Otherwise they count your workouts only.
+
+**Easy vs hard:** for fitness, about ${pct(A.EASY_SHARE_TARGET)} of cardio time should be easy (zone 1-2) and the rest mostly a little zone 4-5 (like intervals), rather than lots of zone 3, which tires you without adding as much. Zone 5 is for short intervals only.
+
+Minutes use the zones your watch had when you recorded each workout.`;
+
+const ZONE_GROUPS: [string, (p: A.ZonePeriod) => number, number][] = [
+  ['Easy', (p) => p.z1_min + p.z2_min, 1],
+  ['Moderate', (p) => p.z3_min, 2],
+  ['Hard', (p) => p.z4_min + p.z5_min, 4],
+];
+
+const mainZone = (a: Activity) => {
+  const zs = A.ZONES.map((z) => a[z] ?? 0);
+  return Math.max(...zs) > 0 ? zs.indexOf(Math.max(...zs)) + 1 : null;
+};
+
+export function CardioSections({ c }: { c: Ctx }) {
   const t = useTheme();
   const { d, today } = c;
   const [allActs, setAllActs] = useState(false);
@@ -23,96 +46,89 @@ export function CardioScreen({ c }: { c: Ctx }) {
   const b = bucketFor(c.range, allCardio[0]?.date);
   const from = rangeStart(c.range);
 
-  // zone minutes only exist per week / month: monthly for long all-time views, else weekly, and
-  // at least the last 4 weeks so a short range still has something to compare
+  // zone minutes only exist per week / month: monthly for long all-time views, else weekly (at least 4 weeks)
   const per: 'Week' | 'Month' = b === 'month' ? 'Month' : 'Week';
+  const unit = per.toLowerCase();
   const zt = useMemo(() => A.zoneTime(d.activities, !allActs), [d.activities, allActs]);
   const zp = useMemo(() => (zt.length ? A.zonePeriods(zt, per === 'Week' ? 'W' : 'M', d.daily) : []), [zt, per, d.daily]);
   const zpShown = inRange(zp, (p) => p.period, c.range, 28);
-  const unit = per.toLowerCase();
 
-  let zoneBlock = <Notice text="No heart-rate zone data yet. It arrives with the next sync (or use **Sync now** in Settings)." />;
+  let goal = <Notice text="No heart-rate zone data yet. It arrives with the next sync (or use **Sync now** in Settings)." />;
   if (zp.length) {
     const lastP = zp[zp.length - 1];
     const cur = lastP.period >= addDays(today, per === 'Week' ? -6 : -30) ? lastP : null;
     const full = cur ? zp.slice(0, -1) : zp; // leave out the week / month still in progress
     const recent = full.slice(per === 'Week' ? -4 : -3);
     const hasGarmin = zp.some((p) => p.garmin_intensity !== null);
-    const easy = sum(recent.map((p) => p.z1_min + p.z2_min));
-    const tot = sum(recent.flatMap((p) => A.ZONES.map((z) => p[z])));
+    const minutes = (p: A.ZonePeriod) => (hasGarmin ? p.garmin_intensity : p.moderate_eq);
+    const avg = mean(recent.map(minutes));
     const avgTarget = mean(recent.map((p) => p.target_lo));
-    const avgGarmin = mean(recent.map((p) => p.garmin_intensity));
-    const barWidth = per === 'Week' ? 5.6 : 24;
-    const series: Series[] = [
-      ...A.ZONES.map((z, i) => ({
-        type: 'bar' as const, name: `Zone ${i + 1}`, color: A.ZONE_COLORS[i], data: zpShown.map((p) => ({ x: toDays(p.period), y: p[z] })),
-      })),
-      { type: 'line', name: 'WHO minutes from workouts', color: t.text, markers: true, data: zpShown.map((p) => ({ x: toDays(p.period), y: p.moderate_eq })) },
-      ...(hasGarmin
-        ? [{ type: 'line' as const, name: 'Garmin all-day intensity minutes', color: '#8a6fc4', dash: true, markers: true, data: zpShown.map((p) => ({ x: toDays(p.period), y: p.garmin_intensity })) }]
-        : []),
-      { type: 'line', name: `WHO minimum (${A.WHO_WEEKLY_MIN[0]} min/week)`, color: '#3c9a6e', dash: true, data: zpShown.map((p) => ({ x: toDays(p.period), y: p.target_lo })) },
-      { type: 'line', name: `WHO extra benefit (${A.WHO_WEEKLY_MIN[1]} min/week)`, color: '#3c9a6e', dash: true, width: 1, data: zpShown.map((p) => ({ x: toDays(p.period), y: p.target_hi })) },
-    ];
-    zoneBlock = (
+    const split = ZONE_GROUPS.map(([label, f, zone]) => ({ label, zone, min: sum(zpShown.map(f)) }));
+    const total = sum(split.map((s) => s.min));
+    const easyShare = total ? split[0].min / total : null;
+
+    goal = (
       <>
-        <Chart title={`Workout minutes per zone, per ${unit}`} height={280} yTitle="minutes" barWidth={barWidth}
-          bucket={per === 'Week' ? 'week' : 'month'} series={series} yFormat={(v) => fmt(v)} />
-        {c.range === 'Week' || c.range === 'Month' ? <Caption>Zone minutes are counted per week, so this chart shows at least the last 4 weeks.</Caption> : null}
-        <MetricGrid>
-          <Metric
-            label={`WHO minutes from workouts, last ${recent.length} ${unit}s (avg)`}
-            value={fmt(mean(recent.map((p) => p.moderate_eq)))}
-            delta={`target ${fmt(avgTarget)}+`}
-            deltaColor="off"
-          />
-          {hasGarmin ? (
-            <Metric
-              label="Garmin all-day intensity minutes (avg)"
-              value={fmt(avgGarmin)}
-              delta={isNum(avgGarmin) && isNum(avgTarget) ? `${fmtSigned(avgGarmin - avgTarget)} vs WHO minimum` : null}
-            />
-          ) : null}
-          <Metric label="Easy share (zone 1-2)" value={tot ? pct(easy / tot) : '-'} delta={`target ~${pct(A.EASY_SHARE_TARGET)}`} deltaColor="off" />
-          <Metric
-            label="Hard minutes (zone 4-5)"
-            value={fmt(sum(recent.map((p) => p.z4_min + p.z5_min)))}
-            delta={`in the last ${recent.length} ${unit}s`}
-            deltaColor="off"
-          />
-        </MetricGrid>
-        {cur ? (
-          <Caption>
-            This {unit} so far: {fmt(cur.moderate_eq)} WHO minutes from workouts
-            {cur.garmin_intensity !== null ? `, ${fmt(cur.garmin_intensity)} Garmin intensity minutes` : ''} (target{' '}
-            {fmt(cur.target_lo)}+). Averages above use the last full {unit}s.
-          </Caption>
-        ) : null}
-        <Bullets
-          items={[
-            `**WHO:** ${A.WHO_WEEKLY_MIN[0]}-${A.WHO_WEEKLY_MIN[1]} min of moderate activity a week (zone 2-3), where one vigorous minute (zone 4-5) counts as two, plus strength training on 2+ days. The solid line is your workouts only; Garmin's intensity minutes (purple) also count brisk walking during the day, so they are usually the fairer comparison.`,
-            `**80/20 for fitness:** about ${pct(A.EASY_SHARE_TARGET)} of cardio time easy (zone 1-2), the rest harder - mostly a little zone 4-5 (like intervals) rather than lots of zone 3, which tires you without adding as much.`,
-            '**Zone 5** is for short intervals only - a few minutes a week at most is plenty.',
+        <Chart
+          height={210}
+          yTitle="minutes"
+          barWidth={per === 'Week' ? 5.6 : 24}
+          bucket={per === 'Week' ? 'week' : 'month'}
+          yFormat={(v) => fmt(v)}
+          series={[
+            { type: 'bar', name: hasGarmin ? 'Intensity minutes' : 'Minutes from workouts', color: '#5d6ad1', data: zpShown.map((p) => ({ x: toDays(p.period) + (per === 'Week' ? 3 : 14), y: minutes(p) })) },
+            { type: 'line', name: 'Weekly goal', color: '#3c9a6e', dash: true, data: zpShown.map((p) => ({ x: toDays(p.period) + (per === 'Week' ? 3 : 14), y: p.target_lo })) },
           ]}
         />
-        <Caption>
-          Minutes are counted with the zones your watch had when you recorded each workout (see the Heart-rate zones tab). If you
-          change your zones, only new workouts use them.
-        </Caption>
+        <MetricGrid>
+          <Metric
+            label={`Average ${unit}, last ${recent.length}`}
+            value={`${fmt(avg)} min`}
+            delta={isNum(avg) && isNum(avgTarget) ? `${fmtSigned(avg - avgTarget)} vs goal of ${fmt(avgTarget)}` : null}
+          />
+          {cur ? <Metric label={`This ${unit} so far`} value={`${fmt(minutes(cur))} min`} delta={`goal ${fmt(cur.target_lo)}`} deltaColor="off" /> : null}
+        </MetricGrid>
+        {total ? (
+          <View style={{ gap: 6 }}>
+            <Text style={{ color: t.text, fontSize: 14, fontWeight: '600' }}>
+              {pct(easyShare as number)} easy <Text style={{ color: t.muted, fontWeight: '400' }}>· aim for about {pct(A.EASY_SHARE_TARGET)}</Text>
+            </Text>
+            <View style={[st.split, { backgroundColor: t.surface }]}>
+              {split.filter((s) => s.min > 0).map((s) => (
+                <View key={s.label} style={{ flex: s.min, backgroundColor: A.ZONE_COLORS[s.zone - 1] }} />
+              ))}
+              <View style={[st.target, { left: `${A.EASY_SHARE_TARGET * 100}%`, backgroundColor: t.text }]} />
+            </View>
+            <View style={{ flexDirection: 'row', gap: 14, flexWrap: 'wrap' }}>
+              {split.map((s) => (
+                <Text key={s.label} style={{ color: t.muted, fontSize: 12.5 }}>
+                  <Text style={{ color: A.ZONE_COLORS[s.zone - 1] }}>● </Text>{s.label} {fmt(s.min)} min
+                </Text>
+              ))}
+            </View>
+          </View>
+        ) : null}
+        <Toggle label="Count strength and other workouts too" value={allActs} onChange={setAllActs} />
       </>
     );
   }
 
   const vo2 = d.activities.filter((a) => isNum(a.vo2max));
   const checks = P().days.filter((x) => x.cardioKind === 'vo2check').map((x) => x.date);
+  const newest = [...cardio].reverse();
 
   return (
-    <View style={{ gap: 12 }}>
+    <>
+      <Section title="Cardio this period" info={ZONES_INFO}>{goal}</Section>
+
       {allCardio.length ? (
-        <Section title={b === 'day' ? 'Cardio sessions' : `Cardio minutes per ${b}`}>
+        <Section
+          title={b === 'day' ? 'Cardio sessions' : `Cardio minutes per ${b}`}
+          info={b === 'day' ? 'Bubble size = minutes. Tap a bubble, or a session below, for details.' : `Total minutes each ${b}, by activity. Tap a bar for details.`}
+        >
           {b === 'day' ? (
             <Chart
-              height={240}
+              height={200}
               yTitle="minutes"
               xMin={from ? toDays(from) - 0.5 : undefined}
               xMax={toDays(todayISO()) + 1}
@@ -122,13 +138,13 @@ export function CardioScreen({ c }: { c: Ctx }) {
                 type: 'scatter', name: 'Sessions', color: '#5d6ad1', legend: false,
                 data: cardio.map((a) => ({
                   x: timeX(a.start), y: a.duration_min, r: 3 + 11 * Math.sqrt(a.duration_min / maxMin), color: typeColors.get(a.type),
-                  label: `${fmtDate(a.date)} ${a.name} · ${a.type} · ${fmt(a.duration_min)} min · avg HR ${fmt(a.avg_hr)} · max ${fmt(a.max_hr)}`,
+                  label: `${fmtDate(a.date)} ${a.name} · ${fmt(a.duration_min)} min · avg HR ${fmt(a.avg_hr)}`,
                 })),
               }]}
             />
           ) : (
             <Chart
-              height={240}
+              height={200}
               yTitle="minutes"
               bucket={b}
               barWidth={barWidthFor(b)}
@@ -141,37 +157,45 @@ export function CardioScreen({ c }: { c: Ctx }) {
               }))}
             />
           )}
-          <Caption>{b === 'day' ? 'Bubble size = minutes. Tap a bubble for details.' : `Total minutes each ${b}, by activity. Tap a bar for details.`}</Caption>
-          <Table
-            columns={['Start', 'Name', 'Type', 'Min', 'Avg HR', 'Max HR', 'Z1', 'Z2', 'Z3', 'Z4', 'Z5', 'Main zone']}
-            rows={[...cardio].reverse().map((a) => {
-              const zs = A.ZONES.map((z) => a[z] ?? 0);
-              const total = zs.reduce((x, y) => x + y, 0);
-              return [
-                `${fmtDate(a.date)} ${a.start.slice(11, 16)}`, a.name, a.type, fmt(a.duration_min, 1), fmt(a.avg_hr), fmt(a.max_hr),
-                ...A.ZONES.map((z) => fmt(a[z], 1)), total > 0 ? zs.indexOf(Math.max(...zs)) + 1 : '-',
-              ];
-            })}
+          <ShowMore
+            items={newest}
+            limit={4}
+            render={(a) => {
+              const z = mainZone(a);
+              return (
+                <ListRow key={a.activity_id} title={a.name} sub={`${fmtDate(a.date)} · ${fmt(a.duration_min)} min${z ? ` · mostly zone ${z}` : ''}`}>
+                  <KeyValue label="Started" value={a.start.slice(11, 16)} />
+                  <KeyValue label="Average / max heart rate" value={`${fmt(a.avg_hr)} / ${fmt(a.max_hr)} bpm`} />
+                  {A.ZONES.map((zk, i) => <KeyValue key={zk} label={`Zone ${i + 1}`} value={`${fmt(a[zk], 1)} min`} />)}
+                </ListRow>
+              );
+            }}
           />
         </Section>
-      ) : (
-        <Notice text="No cardio sessions yet." />
-      )}
+      ) : null}
 
-      <Section title="Time in heart-rate zones">
-        <Toggle label="Include strength training and other workouts" value={allActs} onChange={setAllActs} />
-        <Caption>WHO counts any activity that gets your heart rate up; strength sessions mostly sit in zone 1-2.</Caption>
-        {zoneBlock}
-      </Section>
-
-      <Section title="VO2max">
+      <Section
+        title="VO2max"
+        info={`VO2max readings only come from outdoor runs or walks with GPS.${checks.length ? `\n\nYour plan has check runs on ${checks.map((x) => fmtDate(x)).join(' and ')} - compare the readings.` : ''}`}
+      >
         {vo2.length ? (
-          <Table columns={['Date', 'Activity', 'VO2max']} rows={[...vo2].reverse().map((a) => [fmtDate(a.date, { weekday: false, year: true }), a.name, a.vo2max])} />
+          <MetricGrid>
+            <Metric label="Latest" value={String(vo2[vo2.length - 1].vo2max)} delta={fmtDate(vo2[vo2.length - 1].date, { weekday: false, year: true })} deltaColor="off" />
+            {vo2.length > 1 ? (
+              <Metric label={`Since ${fmtDate(vo2[0].date, { weekday: false })}`} value={fmtSigned((vo2[vo2.length - 1].vo2max as number) - (vo2[0].vo2max as number), 0)} />
+            ) : null}
+          </MetricGrid>
         ) : (
-          <Caption>No VO2max readings yet - they only come from outdoor runs/walks with GPS.</Caption>
+          <Text style={{ color: t.muted, fontSize: 14 }}>No readings yet.</Text>
         )}
-        {checks.length ? <Caption>Plan: VO2max check runs on {checks.map((x) => fmtDate(x)).join(' and ')} - compare the readings.</Caption> : null}
       </Section>
-    </View>
+
+      <LinkCard title="Heart-rate zones" sub="Check your zones and what to change in Garmin" onPress={() => c.open('zones')} />
+    </>
   );
 }
+
+const st = StyleSheet.create({
+  split: { height: 12, borderRadius: 6, overflow: 'hidden', flexDirection: 'row' },
+  target: { position: 'absolute', top: -2, bottom: -2, width: 2, marginLeft: -1 },
+});

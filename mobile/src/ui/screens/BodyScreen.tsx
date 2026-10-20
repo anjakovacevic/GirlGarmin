@@ -75,11 +75,15 @@ export function BodyScreen({ c }: { c: Ctx }) {
 
   return (
     <View style={{ gap: 12 }}>
-      <Section title="Your goal">
+      <Section title="Your goal" info={'Choosing "Lose weight" shows a safe pace band on the chart, based on your current weight.'}>
         <Segmented options={[...GOALS]} value={GOALS[lose ? 1 : 0]} onChange={(g) => c.setGoal(g === GOALS[1] ? 'lose' : 'track')} />
-        <Caption>Choosing "Lose weight" shows a safe pace band based on your current weight.</Caption>
       </Section>
-      <Section title="Weight">
+      <Section
+        title="Weight"
+        info={(lose
+          ? `**Target pace:** -${lo} to -${hi} kg a week (${pctLo}-${pctHi}% of your current weight, which keeps strength and muscle best) - about ${fmt(last.weight_kg - hi * weeksLeft, 1)}-${fmt(last.weight_kg - lo * weeksLeft, 1)} kg by ${fmtShort(end)}.\n\n`
+          : '') + 'The trend line uses all your weigh-ins, so it catches up a few weeks after you change your eating. Weight swings about 1 kg from day to day - judge the weekly average.'}
+      >
         <Chart height={280} yTitle="kg" bucket={wb} xMin={toDays(from) - 1} series={series} yFormat={(v) => fmt(v, 1)}
           empty="No weigh-ins in this period." />
         <MetricGrid>
@@ -87,14 +91,6 @@ export function BodyScreen({ c }: { c: Ctx }) {
           {wt ? <Metric label="Trend" value={`${fmtSigned(wt.perWeek, 2)} kg/week`} /> : null}
           {wt ? <Metric label={`Projected ${fmtShort(end)} at this trend`} value={`${fmt(wt.projected, 1)} kg`} /> : null}
         </MetricGrid>
-        <Caption>
-          {lose
-            ? `Target pace: -${lo} to -${hi} kg/week (${pctLo}-${pctHi}% of your current weight, which keeps strength and muscle best) -> about ` +
-              `${fmt(last.weight_kg - hi * weeksLeft, 1)}-${fmt(last.weight_kg - lo * weeksLeft, 1)} kg by ${fmtShort(end)}. `
-            : ''}
-          The trend line uses all your weigh-ins, so it catches up a few weeks after you change your eating. Weight swings ~1 kg
-          day to day - judge the weekly average.
-        </Caption>
       </Section>
       {stepsChart}
     </View>
