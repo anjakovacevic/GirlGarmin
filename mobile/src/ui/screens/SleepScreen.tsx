@@ -18,7 +18,7 @@ const BED_BINS: [number, number, string][] = [
 export function SleepScreen({ c }: { c: Ctx }) {
   const nights = useMemo(() => A.sleepNights(c.d.daily, c.phases), [c.d.daily, c.phases]);
   const bands = useMemo(() => phaseBands(c.phases, PHASE_COLORS), [c.phases]);
-  if (!nights.length) return <Notice text="Tap **Sync** at the top to load sleep details." />;
+  if (!nights.length) return <Notice text="No sleep details yet. They arrive with the next sync (or use **Sync now** in Settings)." />;
 
   const last = nights[nights.length - 1];
   const recent = nights.slice(-30);

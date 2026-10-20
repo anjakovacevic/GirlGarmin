@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
 import { View } from 'react-native';
 
-import { addDays, diffDays, fmtDate, fmtShort, toDays } from '../../lib/dates';
+import { addDays, diffDays, fmtDate, fmtShort, toDays, todayISO } from '../../lib/dates';
 import { fmt } from '../../lib/stats';
 import { Chart, phaseBands } from '../Chart';
 import { Caption, Metric, MetricGrid, Notice, Section, Table } from '../components';
 import type { Ctx } from '../context';
-import { inRange } from '../range';
+import { inRange, rangeStart } from '../range';
 import { PHASE_COLORS } from '../theme';
 
 export function CycleScreen({ c }: { c: Ctx }) {
@@ -18,6 +18,11 @@ export function CycleScreen({ c }: { c: Ctx }) {
   const temps = inRange(c.d.daily.filter((x) => x.skin_temp_dev !== null), (x) => x.date, c.range);
   const fs = pred.fertileStart;
   const fe = pred.fertileEnd;
+  // the chart covers the chosen range up to today; the predicted period shows only when it falls inside it
+  const end = todayISO();
+  const from = rangeStart(c.range) ?? temps[0]?.date ?? end;
+  const predicted = { x0: toDays(addDays(pred.nextPeriod, -2)), x1: toDays(addDays(pred.nextPeriod, 2)) };
+  const predictedShown = predicted.x0 <= toDays(end) + 0.5;
   const fertile = fs && fe ? (fs.slice(0, 7) === fe.slice(0, 7) ? `${fs.slice(8)}-${fmtShort(fe)}` : `${fmtShort(fs)}-${fmtShort(fe)}`) : '-';
 
   return (
@@ -44,11 +49,11 @@ export function CycleScreen({ c }: { c: Ctx }) {
           <Chart
             height={280}
             yTitle="deg C vs your baseline"
-            xMin={toDays(temps[0].date) - 2}
-            xMax={toDays(pred.nextPeriod) + 5}
+            xMin={toDays(from) - 0.5}
+            xMax={toDays(end) + 0.5}
             vbands={[
               ...bands,
-              { x0: toDays(addDays(pred.nextPeriod, -2)), x1: toDays(addDays(pred.nextPeriod, 2)), color: 'rgba(220,60,90,0.25)', label: 'predicted period' },
+              ...(predictedShown ? [{ ...predicted, color: 'rgba(220,60,90,0.25)', label: 'predicted period' }] : []),
             ]}
             vlines={info.flatMap((ci) => [
               { x: toDays(ci.start), color: '#c8424f', width: 2 },

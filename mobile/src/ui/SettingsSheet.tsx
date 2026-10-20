@@ -13,6 +13,9 @@ export type WatchAction = 'upload' | 'refresh' | 'strength' | 'cardio' | 'extend
 
 export interface SettingsProps {
   signedIn: boolean;
+  lastSync: string | null; // "today at 14:05"
+  syncing: boolean; // a background sync is running
+  onSync: () => void;
   onClose: () => void;
   onPlanStart: (d: ISODate) => void;
   onLogin: () => void;
@@ -98,7 +101,14 @@ export function SettingsSheet(p: SettingsProps) {
 
           <Section title="Garmin account">
             {p.signedIn ? (
-              <Button kind="secondary" title="Log out" onPress={() => confirm('Log out?', "Deletes the login token from this phone. Your downloaded data stays.", 'Log out', p.onLogout)} />
+              <>
+                <Caption>
+                  The app syncs by itself when you open it, at most once an hour.
+                  {p.syncing ? ' Syncing now...' : p.lastSync ? ` Last synced ${p.lastSync}.` : ''}
+                </Caption>
+                <Button title="Sync now" onPress={p.onSync} />
+                <Button kind="secondary" title="Log out" onPress={() => confirm('Log out?', "Deletes the login token from this phone. Your downloaded data stays.", 'Log out', p.onLogout)} />
+              </>
             ) : (
               <Button title="Sign in with Garmin" onPress={p.onLogin} />
             )}

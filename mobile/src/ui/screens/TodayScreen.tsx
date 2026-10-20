@@ -29,6 +29,9 @@ export function TodayScreen({ c }: { c: Ctx }) {
 
   const weekStart = mondayOf(today);
   const planWeek = P().days.filter((x) => x.date >= weekStart && x.date < addDays(weekStart, 7));
+  const weekDays = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(weekStart, i));
+  // cycle day on the date shown: counted from the last period logged on or before it
+  const cyc = A.predictCycle(c.info.filter((x) => x.start <= today), today);
   // lifting counts for the session it belongs to, even when done on another day of the week
   const doneOn = A.matchSessions(d.activities);
   const lifted = new Set(planWeek.filter((x) => doneOn.has(x.date)).map((x) => x.date));
@@ -57,7 +60,7 @@ export function TodayScreen({ c }: { c: Ctx }) {
             deltaColor="off"
           />
         ) : (
-          <Metric label="Plan" value="Outside plan dates" />
+          <Metric label="Plan" value="No plan selected" />
         )}
         {rec ? (
           <Metric
@@ -66,7 +69,7 @@ export function TodayScreen({ c }: { c: Ctx }) {
             delta={isNum(rec.hrv) && isNum(rec.phaseBaseline) ? `${fmtSigned(rec.hrv - rec.phaseBaseline)} vs your ${rec.phase ?? ''} normal` : null}
           />
         ) : null}
-        {c.pred ? <Metric label="Cycle day" value={c.pred.cycleDay} delta={c.pred.phase} deltaColor="off" /> : null}
+        {cyc ? <Metric label="Cycle day" value={cyc.cycleDay} delta={cyc.phase} deltaColor="off" /> : null}
         {lastW ? (
           <Metric
             label="Weight"
@@ -135,43 +138,65 @@ export function TodayScreen({ c }: { c: Ctx }) {
         </Section>
       ) : null}
 
-      <Section title="This week">
-        <View style={[st.weekRow, { borderBottomColor: t.border }]}>
-          <Text style={[st.wDay, st.wHead, { color: t.muted }]}>Day</Text>
-          <Text style={[st.wPlan, st.wHead, { color: t.muted }]}>Plan</Text>
-          <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Lift</Text>
-          <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Cardio</Text>
-        </View>
-        {planWeek.map((x) => {
-          const cardio = cardioLabel(x.cardioKind);
-          const isToday = x.date === today;
-          const done = doneOn.get(x.date);
-          return (
-            <View key={x.date} style={[st.weekRow, { borderBottomColor: t.border }, isToday && [st.todayRow, { backgroundColor: t.accentSoft }]]}>
-              <Text style={[st.wDay, { color: t.text, fontWeight: isToday ? '700' : '400' }]}>{fmtDate(x.date)}</Text>
-              <View style={st.wPlan}>
-                <Text style={{ color: t.text, fontSize: 13.5 }}>
-                  {[x.session?.title, cardio || (!x.session ? 'Rest' : '')].filter(Boolean).join(' + ')}
-                </Text>
-                {done && done.date !== x.date ? (
-                  <Text style={[st.wNote, { color: t.muted }]}>Done {done.date < x.date ? 'early' : 'late'}, on {fmtDate(done.date)}</Text>
-                ) : null}
-                {movedHere(x.date).map((m) => (
-                  <Text key={m.date} style={[st.wNote, { color: t.good }]}>Did {m.session!.title} here (planned {fmtDate(m.date)})</Text>
-                ))}
-                {extra(x.date) ? <Text style={[st.wNote, { color: t.good }]}>Extra lifting session</Text> : null}
+      {planWeek.length ? (
+        <Section title="This week">
+          <View style={[st.weekRow, { borderBottomColor: t.border }]}>
+            <Text style={[st.wDay, st.wHead, { color: t.muted }]}>Day</Text>
+            <Text style={[st.wPlan, st.wHead, { color: t.muted }]}>Plan</Text>
+            <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Lift</Text>
+            <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Cardio</Text>
+          </View>
+          {planWeek.map((x) => {
+            const cardio = cardioLabel(x.cardioKind);
+            const isToday = x.date === today;
+            const done = doneOn.get(x.date);
+            return (
+              <View key={x.date} style={[st.weekRow, { borderBottomColor: t.border }, isToday && [st.todayRow, { backgroundColor: t.accentSoft }]]}>
+                <Text style={[st.wDay, { color: t.text, fontWeight: isToday ? '700' : '400' }]}>{fmtDate(x.date)}</Text>
+                <View style={st.wPlan}>
+                  <Text style={{ color: t.text, fontSize: 13.5 }}>
+                    {[x.session?.title, cardio || (!x.session ? 'Rest' : '')].filter(Boolean).join(' + ')}
+                  </Text>
+                  {done && done.date !== x.date ? (
+                    <Text style={[st.wNote, { color: t.muted }]}>Done {done.date < x.date ? 'early' : 'late'}, on {fmtDate(done.date)}</Text>
+                  ) : null}
+                  {movedHere(x.date).map((m) => (
+                    <Text key={m.date} style={[st.wNote, { color: t.good }]}>Did {m.session!.title} here (planned {fmtDate(m.date)})</Text>
+                  ))}
+                  {extra(x.date) ? <Text style={[st.wNote, { color: t.good }]}>Extra lifting session</Text> : null}
+                </View>
+                <View style={st.wTick}>{tick(!!x.session, lifted.has(x.date), x.date)}</View>
+                <View style={st.wTick}>{tick(!!cardio, moved.has(x.date), x.date, x.cardioKind === 'zone2-30')}</View>
               </View>
-              <View style={st.wTick}>{tick(!!x.session, lifted.has(x.date), x.date)}</View>
-              <View style={st.wTick}>{tick(!!cardio, moved.has(x.date), x.date, x.cardioKind === 'zone2-30')}</View>
-            </View>
-          );
-        })}
-        <Caption>
-          A session done on another day of the same week still counts; the row says when. Cardio counts as done when any
-          non-strength activity is recorded that day. The 30-min zone-2 walks are optional, so
-          a missed one shows —.
-        </Caption>
-      </Section>
+            );
+          })}
+          <Caption>
+            A session done on another day of the same week still counts; the row says when. Cardio counts as done when any
+            non-strength activity is recorded that day. The 30-min zone-2 walks are optional, so
+            a missed one shows —.
+          </Caption>
+        </Section>
+      ) : (
+        <Section title="This week">
+          <View style={[st.weekRow, { borderBottomColor: t.border }]}>
+            <Text style={[st.wDay, st.wHead, { color: t.muted, flex: 1 }]}>Day</Text>
+            <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Lift</Text>
+            <Text style={[st.wTick, st.wHead, { color: t.muted }]}>Cardio</Text>
+          </View>
+          {weekDays.map((date) => {
+            const isToday = date === today;
+            const acts = d.activities.filter((a) => a.date === date);
+            return (
+              <View key={date} style={[st.weekRow, { borderBottomColor: t.border }, isToday && [st.todayRow, { backgroundColor: t.accentSoft }]]}>
+                <Text style={[st.wDay, { color: t.text, flex: 1, fontWeight: isToday ? '700' : '400' }]}>{fmtDate(date)}</Text>
+                <View style={st.wTick}>{acts.some((a) => a.type === 'strength_training') ? <CheckIcon color={t.good} size={18} /> : null}</View>
+                <View style={st.wTick}>{acts.some((a) => a.type !== 'strength_training') ? <CheckIcon color={t.good} size={18} /> : null}</View>
+              </View>
+            );
+          })}
+          <Caption>No training plan this week, so this shows the activities you logged.</Caption>
+        </Section>
+      )}
     </View>
   );
 }

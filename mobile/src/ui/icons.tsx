@@ -11,13 +11,6 @@ const Icon = ({ size = 22, children }: { size?: number; children: ReactNode }) =
 
 const stroke = (color: string) => ({ stroke: color, strokeWidth: 1.8, strokeLinecap: 'round' as const, strokeLinejoin: 'round' as const });
 
-export const SyncIcon = ({ color, size }: IconProps) => (
-  <Icon size={size}>
-    <Path d="M20 12a8 8 0 0 1-14.3 4.9M4 12a8 8 0 0 1 14.3-4.9" {...stroke(color)} />
-    <Path d="M18.5 3v4.2h-4.2M5.5 21v-4.2h4.2" {...stroke(color)} />
-  </Icon>
-);
-
 export const GearIcon = ({ color, size }: IconProps) => (
   <Icon size={size}>
     <Circle cx={12} cy={12} r={3} {...stroke(color)} />

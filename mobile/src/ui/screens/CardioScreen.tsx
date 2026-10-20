@@ -31,7 +31,7 @@ export function CardioScreen({ c }: { c: Ctx }) {
   const zpShown = inRange(zp, (p) => p.period, c.range, 28);
   const unit = per.toLowerCase();
 
-  let zoneBlock = <Notice text="No heart-rate zone data yet - tap **Sync** at the top." />;
+  let zoneBlock = <Notice text="No heart-rate zone data yet. It arrives with the next sync (or use **Sync now** in Settings)." />;
   if (zp.length) {
     const lastP = zp[zp.length - 1];
     const cur = lastP.period >= addDays(today, per === 'Week' ? -6 : -30) ? lastP : null;

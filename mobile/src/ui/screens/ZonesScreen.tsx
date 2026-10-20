@@ -19,7 +19,7 @@ const HOW_TO = [
 
 export function ZonesScreen({ c }: { c: Ctx }) {
   const zs = c.d.zones;
-  if (!zs) return <Notice text="No heart-rate zone settings yet - tap **Sync** at the top." />;
+  if (!zs) return <Notice text="No heart-rate zone settings yet. They arrive with the next sync (or use **Sync now** in Settings)." />;
   const tests = c.hrTests;
   const adv = A.hrZoneAdvice(zs, c.d.daily, c.d.activities, tests);
   const [lo, hi] = adv.zone2;

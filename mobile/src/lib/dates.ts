@@ -21,9 +21,8 @@ export const addDays = (d: ISODate, n: number): ISODate => fromDays(toDays(d) + 
 /** a - b in days. */
 export const diffDays = (a: ISODate, b: ISODate): number => toDays(a) - toDays(b);
 
-/** Today on the phone's own clock. */
-export function todayISO(): ISODate {
-  const t = new Date();
+/** Today (or the day of `t`) on the phone's own clock. */
+export function todayISO(t = new Date()): ISODate {
   return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}`;
 }
 
