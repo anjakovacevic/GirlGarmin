@@ -1,5 +1,6 @@
 import type { CycleInfo, CyclePrediction, Data, HrTests, LiftSession, Phase, Settings } from '../analysis';
 import type { ISODate } from '../lib/dates';
+import type { PlanData } from '../plan';
 import type { Range } from './range';
 
 /** Everything a dashboard tab needs, computed once per data load / date change in App. */
@@ -16,4 +17,7 @@ export interface Ctx {
   setHrTests: (t: HrTests) => void;
   /** What the charts show (picked above the chart tabs, shared by all of them). */
   range: Range;
+  /** Every saved plan (Plan tab); saving re-applies the schedule and reloads the app. */
+  plans: PlanData[];
+  savePlans: (plans: PlanData[]) => Promise<void>;
 }

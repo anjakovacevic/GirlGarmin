@@ -13,7 +13,10 @@ import {
   corr, fmt, groupBy, isNum, max, mean, median, type Num, pct, polyfit, round, roundHalfEven, sum,
 } from './lib/stats';
 import { store } from './lib/store';
-import { dayPlan, P, type PlanDay } from './plan';
+import { dayPlan, P, type PlanDay, projectionEnd } from './plan';
+import { matchSessions } from './sessions';
+
+export { matchSessions };
 import * as progression from './progression';
 import type { Activity, CycleRow, DailyRow, SetRow, Tables, WeightRow } from './tables';
 
@@ -115,7 +118,7 @@ export function lossTarget(weightKg: number): [number, number] {
 }
 
 export function weightForecast(weight: WeightRow[]): Trend | null {
-  return weight.length ? linearTrend(weight.map((w) => w.date), weight.map((w) => w.weight_kg), P().end) : null;
+  return weight.length ? linearTrend(weight.map((w) => w.date), weight.map((w) => w.weight_kg), projectionEnd()) : null;
 }
 
 // ---------------------------------------------------------------- lifting
@@ -181,7 +184,7 @@ export function liftForecasts(sessions: LiftSession[], lookbackDays = 42): LiftF
     const g = all.filter((s) => isNum(s.best_e1rm)).sort((a, b) => a.date.localeCompare(b.date));
     if (g.length < 3) continue;
     const recent = g.filter((s) => s.date >= cutoff);
-    const t = recent.length >= 3 ? linearTrend(recent.map((s) => s.date), recent.map((s) => s.best_e1rm), P().end) : null;
+    const t = recent.length >= 3 ? linearTrend(recent.map((s) => s.date), recent.map((s) => s.best_e1rm), projectionEnd()) : null;
     const recentBest = max((recent.length ? recent : g).map((s) => s.best_e1rm)) as number;
     // a few noisy sessions can extrapolate wildly - keep the projection within +-10% of the recent best
     const proj = t ? Math.min(Math.max(t.projected, 0.9 * recentBest), 1.1 * recentBest) : null;
@@ -213,43 +216,6 @@ export type PlanVsActual = PlanRow & {
   actual_sets: Num; actual_kg: Num; actual_best_reps: Num; hit_load: boolean;
   done_on: ISODate | null; // the day the session was actually done, when that's not the planned day
 };
-
-/** Which strength workout did each planned session (planned date -> activity). Sessions often get
- * done a day early or late, so this matches within the plan week (Monday-Sunday), not by date:
- * 1. by name - workouts put on the watch are called e.g. "W3 Upper A - shoulders 13 Oct", so the
- *    longest session title in the name wins, and the date in the name settles repeats;
- * 2. any other lifting workout goes to the open session on the same day, else the nearest one.
- *    A second workout on a day that already counts (e.g. a split recording) is not a session. */
-export function matchSessions(acts: Activity[]): Map<ISODate, Activity> {
-  const out = new Map<ISODate, Activity>();
-  const lifts = acts.filter((a) => a.type === 'strength_training').sort((a, b) => a.start.localeCompare(b.start));
-  const weeks = groupBy(P().days.filter((d) => d.session), (d) => mondayOf(d.date));
-  for (const [monday, days] of weeks) {
-    const sunday = addDays(monday, 6);
-    let free = lifts.filter((a) => a.date >= monday && a.date <= sunday);
-    let open = [...days];
-    const take = (d: PlanDay, a: Activity) => {
-      out.set(d.date, a);
-      free = free.filter((x) => x !== a);
-      open = open.filter((x) => x !== d);
-    };
-    for (const a of [...free]) {
-      const name = a.name.toLowerCase();
-      const hits = open.filter((d) => name.includes(d.session!.title.toLowerCase()));
-      if (!hits.length) continue;
-      const longest = Math.max(...hits.map((d) => d.session!.title.length));
-      const best = hits.filter((d) => d.session!.title.length === longest);
-      take(best.find((d) => name.includes(fmtShort(d.date).toLowerCase())) ?? best.find((d) => d.date === a.date) ?? best[0], a);
-    }
-    for (const a of [...free]) {
-      if (!open.length) break;
-      if ([...out.values()].some((x) => x.date === a.date)) continue;
-      const near = (d: PlanDay) => Math.abs(diffDays(d.date, a.date));
-      take(open.reduce((b, d) => (near(d) < near(b) ? d : b)), a);
-    }
-  }
-  return out;
-}
 
 /** Planned exercises up to `today` next to what Garmin logged that day. Matches on the Garmin
  * exercise name first, then on the category (Garmin often leaves the name empty). */

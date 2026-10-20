@@ -4,7 +4,7 @@ import { Pressable, StyleSheet, Text, View } from 'react-native';
 import * as A from '../../analysis';
 import { addDays, fmtDate, fmtShort, mondayOf } from '../../lib/dates';
 import { fmt, fmtG, fmtSigned, isNum } from '../../lib/stats';
-import { type CardioKind, P } from '../../plan';
+import { allDays, type CardioKind } from '../../plan';
 import * as progression from '../../progression';
 import { Caption, Metric, MetricGrid, Notice, Section } from '../components';
 import type { Ctx } from '../context';
@@ -28,7 +28,7 @@ export function TodayScreen({ c }: { c: Ctx }) {
   const lastW = d.weight.length ? d.weight[d.weight.length - 1] : null;
 
   const weekStart = mondayOf(today);
-  const planWeek = P().days.filter((x) => x.date >= weekStart && x.date < addDays(weekStart, 7));
+  const planWeek = allDays().filter((x) => x.date >= weekStart && x.date < addDays(weekStart, 7));
   const weekDays = [0, 1, 2, 3, 4, 5, 6].map((i) => addDays(weekStart, i));
   // cycle day on the date shown: counted from the last period logged on or before it
   const cyc = A.predictCycle(c.info.filter((x) => x.start <= today), today);
@@ -56,7 +56,7 @@ export function TodayScreen({ c }: { c: Ctx }) {
           <Metric
             label="Plan"
             value={day.session ? day.session.title : day.cardio.includes('Rest') ? 'Rest' : 'Cardio'}
-            delta={`week ${day.week} of ${P().weeks}`}
+            delta={`${day.planName}, week ${day.week} of ${day.planWeeks}`}
             deltaColor="off"
           />
         ) : (

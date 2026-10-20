@@ -18,6 +18,7 @@ import type { Activity } from './tables';
 import type { LiftSet } from './analysis';
 import { addDays, type ISODate, todayISO } from './lib/dates';
 import { type Ex, isDeload, P, type Session, weekOf } from './plan';
+import { matchSessions } from './sessions';
 
 export interface Target {
   sets: number;
@@ -27,6 +28,8 @@ export interface Target {
 }
 
 export type HistSet = LiftSet & { session: string | null };
+/** Logged sets, plus the planned days whose session is already done (even if done on another day). */
+export type Hist = HistSet[] & { donePlanned?: Set<ISODate> };
 
 /** Session an activity belongs to, from its name ("W3 Legs 15 Oct" -> "Legs"). */
 function sessionTitle(name: string): string | null {
@@ -38,11 +41,12 @@ function sessionTitle(name: string): string | null {
 }
 
 /** Logged sets with the plan session they were done in (null if it can't be told). */
-export function history(sets: LiftSet[], acts: Activity[]): HistSet[] {
+export function history(sets: LiftSet[], acts: Activity[]): Hist {
   const titles = new Map(acts.map((a) => [a.activity_id, sessionTitle(a.name)]));
-  return sets
+  const hist = sets
     .map((s) => ({ ...s, session: titles.get(s.activity_id) ?? null }))
     .filter((s) => !isDeload(weekOf(s.date))); // lighter weeks don't set the next target
+  return Object.assign(hist, { donePlanned: new Set(matchSessions(acts).keys()) });
 }
 
 /** One week of double progression (bodyweight exercises stop at the top of the range). */
@@ -51,9 +55,10 @@ function step(ex: Ex, reps: number, kg: number | null): [number, number | null] 
   return reps < ex.repHi ? [reps + 1, kg] : [ex.repLo, kg + ex.incKg];
 }
 
-/** Number of times session `title` is planned in [start, end), lighter weeks not counted. */
-function sessionsBetween(title: string, start: ISODate, end: ISODate): number {
-  return P().days.filter((d) => d.session?.title === title && d.date >= start && d.date < end && !isDeload(d.week)).length;
+/** Number of times session `title` is planned in [start, end) and not done yet, lighter weeks not
+ * counted. A session done a day early has its planned day in the range but must not count twice. */
+function sessionsBetween(title: string, start: ISODate, end: ISODate, done?: Set<ISODate>): number {
+  return P().days.filter((d) => d.session?.title === title && d.date >= start && d.date < end && !isDeload(d.week) && !done?.has(d.date)).length;
 }
 
 /** Target for the session after `done` (the sets of one logged session of `ex`). */
@@ -76,7 +81,7 @@ function nextFrom(ex: Ex, done: HistSet[]): [number, number | null] {
 }
 
 /** Sets, reps and kg for `ex` in `session` on `day`, based on sessions logged before `day`. */
-export function target(ex: Ex, session: Session, day: ISODate, hist: HistSet[], today?: ISODate): Target {
+export function target(ex: Ex, session: Session, day: ISODate, hist: Hist, today?: ISODate): Target {
   const now = [today ?? todayISO(), day].sort()[0];
   const names = new Set([ex.garminName, ...ex.aliases]);
   let mine = hist.filter((s) => s.exercise !== null && names.has(s.exercise) && s.date < day);
@@ -98,7 +103,7 @@ export function target(ex: Ex, session: Session, day: ISODate, hist: HistSet[], 
   // every session still ahead before `day` counts as done: +1 step each (a lighter week keeps
   // the load of the session before it)
   const lighter = isDeload(weekOf(day));
-  for (let i = 0; i < Math.max(0, sessionsBetween(session.title, since, day) - (lighter ? 1 : 0)); i++) {
+  for (let i = 0; i < Math.max(0, sessionsBetween(session.title, since, day, hist.donePlanned) - (lighter ? 1 : 0)); i++) {
     [reps, kg] = step(ex, reps, kg);
   }
   let sets = ex.sets;

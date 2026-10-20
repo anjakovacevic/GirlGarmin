@@ -1,7 +1,8 @@
-/** Put the plan on your Garmin calendar as scheduled workouts, so they sync to your watch
- * (workouts.py). Strength workouts show exercise, reps and target weight on the watch; warm-up and
- * rest steps end when you press lap. Targets come from what you logged last time
- * (progression.ts), so every sync re-uploads the coming week's strength workouts.
+/** Put your plans on your Garmin calendar as scheduled workouts, so they sync to your watch
+ * (workouts.py), and keep the calendar in step: after every plan change and every sync, syncWatch
+ * fixes only the days that differ. Strength workouts show exercise, reps and target weight on the
+ * watch; warm-up and rest steps end when you press lap. Targets come from what you logged last time
+ * (progression.ts), so the coming week's strength workouts follow your latest sessions.
  *
  * Everything uploaded is recorded in garmin_workouts.json (in the app's storage) so it can be
  * removed cleanly. That record is per device: workouts uploaded from the computer can only be
@@ -10,10 +11,11 @@
 
 import type { Garmin } from './garmin/api';
 import { addDays, fmtShort, type ISODate, todayISO } from './lib/dates';
-import { fmtG } from './lib/stats';
 import { store } from './lib/store';
-import { type CardioSport, isDeload, P, type Session } from './plan';
-import { type HistSet, target } from './progression';
+import { fmtG, groupBy } from './lib/stats';
+import { type CardioSport, isDeload, P, scheduledPlans, type Session, withPlan } from './plan';
+import { type Hist, target } from './progression';
+import { SyncCancelled } from './sync';
 
 const MANIFEST = 'garmin_workouts.json';
 
@@ -76,7 +78,7 @@ function workout(name: string, sport: Workout['sportType'], secs: number, descri
 }
 
 /** One strength session for one date: warm-up, then sets x (exercise + rest) per exercise. */
-export function strengthWorkout(session: Session, week: number, day: ISODate, cardio: string, hist: HistSet[]): Workout {
+export function strengthWorkout(session: Session, week: number, day: ISODate, cardio: string, hist: Hist): Workout {
   const steps: Step[] = [step(1, 'warmup')];
   let order = 2;
   const lines = [
@@ -127,11 +129,12 @@ function vo2CheckWorkout(): Workout {
     [step(1, 'interval', 25 * 60, 2)]);
 }
 
-// ---------------------------------------------------------------- uploading
+// ---------------------------------------------------------------- keeping the calendar in step
 
 interface Manifest {
-  workouts: { id: number; name: string; kind: 'strength' | 'cardio' }[];
-  scheduled: { id: number | null; workout_id: number; date: ISODate; name: string }[];
+  workouts: { id: number; name: string; kind: 'strength' | 'cardio'; hash?: string }[];
+  // shape: the plan content behind a strength workout (without targets), to see if the plan changed
+  scheduled: { id: number | null; workout_id: number; date: ISODate; name: string; shape?: string }[];
 }
 
 export type Log = (line: string) => void;
@@ -140,131 +143,134 @@ export const loadManifest = () => store().read<Manifest>(MANIFEST);
 const saveManifest = (m: Manifest) => store().write(MANIFEST, m);
 const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** Upload a workout and note it in the manifest right away (so a crash can still be cleaned up). */
-async function record(api: Garmin, made: Manifest, w: Workout, kind: 'strength' | 'cardio'): Promise<number> {
-  const res = await api.uploadWorkout(w);
-  await pause(500);
-  made.workouts.push({ id: res.workoutId, name: w.workoutName, kind });
-  await saveManifest(made);
-  return res.workoutId;
+/** Short fingerprint of a JSON value (to tell whether a workout changed). */
+function hash(v: unknown): string {
+  const s = JSON.stringify(v);
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = ((h * 33) ^ s.charCodeAt(i)) >>> 0;
+  return h.toString(36);
 }
 
-async function sched(api: Garmin, made: Manifest, wid: number, day: ISODate, name: string): Promise<void> {
-  const res = await api.scheduleWorkout(wid, day);
-  await pause(500);
-  made.scheduled.push({ id: res?.workoutScheduleId ?? res?.id ?? null, workout_id: wid, date: day, name });
-  await saveManifest(made);
+/** Strength targets are re-checked for this many days ahead (they follow what you last lifted). */
+const TARGET_DAYS = 7;
+
+/** One calendar entry the plans call for. */
+interface Wanted {
+  date: ISODate;
+  kind: 'strength' | 'cardio';
+  workout: Workout;
+  hash: string; // the whole workout
+  shape: string; // strength: the plan content without targets; cardio: same as hash
 }
 
-/** Upload the cardio workouts and schedule them on every plan day from `fromDay` on.
- * Zone-2 walks and the VO2max check are uploaded once and reused on each of their days. */
-async function uploadCardio(api: Garmin, made: Manifest, fromDay: ISODate, log: Log): Promise<void> {
-  const reused = new Map<string, number>();
-  for (const w of made.workouts) {
-    if (w.name.startsWith('Zone 2 incline walk ')) {
-      const k = `zone2-${w.name.split(' ')[4]}`;
-      if (!reused.has(k)) reused.set(k, w.id);
-    } else if (w.name.startsWith('VO2max check') && !reused.has('vo2check')) reused.set('vo2check', w.id);
-  }
-  for (const d of P().days) {
-    const kind = d.cardioKind;
-    if (d.date < fromDay || !kind) continue;
-    if (kind === 'intervals') {
-      const w = intervalWorkout(d.week);
-      await sched(api, made, await record(api, made, w, 'cardio'), d.date, w.workoutName);
-      log(`  ${d.date} ${w.workoutName}`);
-    } else if (kind.startsWith('zone2-') || kind === 'vo2check') {
-      if (!reused.has(kind)) {
-        const w = kind === 'vo2check' ? vo2CheckWorkout() : zone2Workout(Number(kind.split('-')[1]));
-        reused.set(kind, await record(api, made, w, 'cardio'));
+/** Every workout your scheduled plans call for from `from` on (each plan's days built with that
+ * plan, so a plan that hasn't started yet gets its own weeks and lighter weeks). */
+function wanted(hist: Hist, from: ISODate): Wanted[] {
+  const out: Wanted[] = [];
+  for (const plan of scheduledPlans()) {
+    withPlan(plan, () => {
+      for (const d of plan.days) {
+        if (d.date < from) continue;
+        if (d.session) {
+          const w = strengthWorkout(d.session, d.week, d.date, d.cardio, hist);
+          const shape = hash({ title: d.session.title, warmup: d.session.warmup, ex: d.session.exercises, week: d.week, lighter: isDeload(d.week), cardio: d.cardio });
+          out.push({ date: d.date, kind: 'strength', workout: w, hash: hash(w), shape });
+        }
+        const kind = d.cardioKind;
+        if (kind === 'intervals' || kind?.startsWith('zone2-') || kind === 'vo2check') {
+          const w = kind === 'intervals' ? intervalWorkout(d.week) : kind === 'vo2check' ? vo2CheckWorkout() : zone2Workout(Number(kind.split('-')[1]));
+          const h = hash(w);
+          out.push({ date: d.date, kind: 'cardio', workout: w, hash: h, shape: h });
+        }
       }
-      const name = kind === 'vo2check' ? 'VO2max check run' : `Zone 2 walk ${kind.split('-')[1]} min`;
-      await sched(api, made, reused.get(kind) as number, d.date, name);
-    }
+    });
   }
+  return out;
 }
 
-/** Upload one strength workout per session day from `fromDay` (to `toDay`) and schedule it. */
-async function uploadStrength(api: Garmin, made: Manifest, hist: HistSet[], fromDay: ISODate, toDay: ISODate | null, log: Log) {
-  for (const d of P().days) {
-    if (d.session && d.date >= fromDay && (toDay === null || d.date <= toDay)) {
-      const w = strengthWorkout(d.session, d.week, d.date, d.cardio, hist);
-      await sched(api, made, await record(api, made, w, 'strength'), d.date, w.workoutName);
-      log(`  ${d.date} ${w.workoutName}`);
-    }
-  }
-}
-
-/** Upload and schedule every workout of the plan. */
-export async function createAll(api: Garmin, hist: HistSet[], log: Log): Promise<void> {
-  if (await loadManifest()) throw new Error('The plan is already on your watch. Delete it first, or use Replace.');
-  const made: Manifest = { workouts: [], scheduled: [] };
-  const from = [P().firstDay, todayISO()].sort()[1];
-  await uploadStrength(api, made, hist, from, null, log);
-  await uploadCardio(api, made, from, log);
-  log(`Created ${made.workouts.length} workouts, ${made.scheduled.length} calendar entries.`);
-}
-
-const isCardio = (w: Manifest['workouts'][number]) =>
-  (w.kind ?? (w.name.includes('VO2max') || w.name.includes('Zone 2') ? 'cardio' : 'strength')) === 'cardio';
-
-/** Re-upload one kind of workout from today on, after editing the plan. With `days`, only the
- * strength workouts of the next `days` days.
- *   strength: deletes the strength workouts scheduled from today on (past ones stay on your
- *             calendar) and uploads them again from the current plan.
- *   cardio:   deletes all cardio workouts (zone-2 walks are shared across dates, so their past
- *             calendar entries disappear too) and uploads them again from today on.
- * Recorded activities are never touched. */
-export async function replace(api: Garmin, hist: HistSet[], kind: 'strength' | 'cardio', log: Log, days?: number): Promise<void> {
+/** Make the Garmin calendar match your plans from today on: remove what's no longer planned (an
+ * ended plan, a moved day, a changed session), add what's missing (a new or queued plan, extra
+ * weeks), and refresh the next week's strength targets. Unchanged days are left alone, past days
+ * are never touched, and nothing happens until the plans were first put on the watch. */
+export async function syncWatch(api: Garmin, hist: Hist, log: Log, cancelled: () => boolean = () => false): Promise<void> {
   const made = await loadManifest();
-  if (!made) throw new Error('The plan is not on your watch yet - upload it first.');
-  const fromDay = [todayISO(), P().firstDay].sort()[1];
-  const toDay = days ? addDays(fromDay, days - 1) : null;
-  let old: Set<number>;
-  if (kind === 'cardio') old = new Set(made.workouts.filter(isCardio).map((w) => w.id));
-  else {
-    const strength = new Set(made.workouts.filter((w) => !isCardio(w)).map((w) => w.id));
-    old = new Set(made.scheduled.filter((x) => strength.has(x.workout_id) && x.date >= fromDay && (toDay === null || x.date <= toDay))
-      .map((x) => x.workout_id));
+  if (!made) return;
+  const today = todayISO();
+  const targetsUntil = addDays(today, TARGET_DAYS - 1);
+  const want = wanted(hist, today);
+  const kindOf = (wid: number) => made.workouts.find((w) => w.id === wid)?.kind ?? 'strength';
+  const hashOf = (wid: number) => made.workouts.find((w) => w.id === wid)?.hash;
+
+  // which calendar entries from today on are still right
+  const keep = new Set<Manifest['scheduled'][number]>();
+  const missing: Wanted[] = [];
+  for (const w of want) {
+    const found = made.scheduled.find((x) => {
+      if (keep.has(x) || x.date !== w.date || kindOf(x.workout_id) !== w.kind) return false;
+      if (w.kind === 'cardio') return hashOf(x.workout_id) ? hashOf(x.workout_id) === w.hash : x.name === w.workout.workoutName;
+      if (x.shape ? x.shape !== w.shape : x.name !== w.workout.workoutName) return false; // the plan changed
+      return w.date > targetsUntil || hashOf(x.workout_id) === w.hash; // near days: targets must match too
+    });
+    if (found) keep.add(found);
+    else missing.push(w);
   }
-  for (const wid of old) {
-    // deleting a workout also removes its calendar entries
-    await api.deleteWorkout(wid);
-    await pause(300);
+  const stale = made.scheduled.filter((x) => x.date >= today && !keep.has(x));
+  if (!stale.length && !missing.length) {
+    log('Your watch is up to date.');
+    return;
   }
-  made.workouts = made.workouts.filter((w) => !old.has(w.id));
-  made.scheduled = made.scheduled.filter((x) => !old.has(x.workout_id));
-  await saveManifest(made);
-  log(`Deleted ${old.size} ${kind} workouts.`);
-  const before = made.workouts.length;
-  if (kind === 'cardio') await uploadCardio(api, made, fromDay, log);
-  else await uploadStrength(api, made, hist, fromDay, toDay, log);
-  log(`Uploaded ${made.workouts.length - before} ${kind} workouts, scheduled from ${fromDay}.`);
+
+  // take stale entries off the calendar; a workout with nothing else on the calendar is deleted
+  for (const [wid, xs] of groupBy(stale, (x) => x.workout_id)) {
+    if (cancelled()) throw new SyncCancelled();
+    const rest = made.scheduled.filter((y) => y.workout_id === wid && !xs.includes(y)); // past or still right
+    if (rest.length && xs.every((x) => x.id)) {
+      for (const x of xs) {
+        await api.unscheduleWorkout(x.id as number);
+        await pause(300);
+      }
+      made.scheduled = made.scheduled.filter((y) => !xs.includes(y));
+    } else {
+      // nothing else uses it - or an entry can't be taken off on its own (no id): delete the
+      // workout, and put back the days from today on that were still right
+      await api.deleteWorkout(wid);
+      await pause(300);
+      for (const y of rest.filter((y) => y.date >= today)) missing.push(...want.filter((w) => w.date === y.date && w.kind === kindOf(wid)));
+      made.workouts = made.workouts.filter((w) => w.id !== wid);
+      made.scheduled = made.scheduled.filter((y) => y.workout_id !== wid);
+    }
+    await saveManifest(made);
+  }
+
+  // add what's missing; cardio workouts that are the same every time are uploaded once and reused
+  for (const w of missing) {
+    if (cancelled()) throw new SyncCancelled();
+    let wid = w.kind === 'cardio' ? made.workouts.find((x) => x.hash === w.hash)?.id : undefined;
+    if (wid === undefined) {
+      const res = await api.uploadWorkout(w.workout);
+      await pause(500);
+      wid = res.workoutId as number;
+      made.workouts.push({ id: wid, name: w.workout.workoutName, kind: w.kind, hash: w.hash });
+      await saveManifest(made);
+    }
+    const res = await api.scheduleWorkout(wid, w.date);
+    await pause(500);
+    made.scheduled.push({ id: res?.workoutScheduleId ?? res?.id ?? null, workout_id: wid, date: w.date, name: w.workout.workoutName, shape: w.shape });
+    await saveManifest(made);
+    log(`  ${w.date} ${w.workout.workoutName}`);
+  }
+  log(`Watch updated: ${stale.length} removed, ${missing.length} added.`);
 }
 
-/** Re-upload the coming week's strength workouts so their targets follow your latest logs.
- * Does nothing if the plan was never uploaded from this phone. */
-export async function refresh(api: Garmin, hist: HistSet[], log: Log, days = 7): Promise<void> {
-  if (await loadManifest()) {
-    log("Updating the coming week's workouts on your watch...");
-    await replace(api, hist, 'strength', log, days);
-  }
+/** Start keeping your watch in step with your plans: from now on every plan change and every sync
+ * updates the Garmin calendar. */
+export async function createAll(api: Garmin, hist: Hist, log: Log): Promise<void> {
+  if (await loadManifest()) throw new Error('Your plans are already on your watch.');
+  await saveManifest({ workouts: [], scheduled: [] });
+  await syncWatch(api, hist, log);
 }
 
-/** Upload the plan days after the last day already on your calendar (e.g. after making the plan
- * longer). Days before that are left as they are. */
-export async function extend(api: Garmin, hist: HistSet[], log: Log): Promise<void> {
-  const made = await loadManifest();
-  if (!made) throw new Error('The plan is not on your watch yet - upload it first.');
-  const last = made.scheduled.map((x) => x.date).sort().pop();
-  const fromDay = [last ? addDays(last, 1) : P().firstDay, todayISO()].sort()[1];
-  const before = made.workouts.length;
-  await uploadStrength(api, made, hist, fromDay, null, log);
-  await uploadCardio(api, made, fromDay, log);
-  log(`Uploaded ${made.workouts.length - before} workouts for the days from ${fromDay}.`);
-}
-
-/** Delete every workout listed in the manifest, then the manifest itself. */
+/** Delete every workout this phone uploaded (past calendar entries too), and stop updating the watch. */
 export async function deleteAll(api: Garmin, log: Log): Promise<void> {
   const made = await loadManifest();
   if (!made) throw new Error('Nothing to delete - no plan was uploaded from this phone.');

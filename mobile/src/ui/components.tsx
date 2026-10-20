@@ -210,15 +210,15 @@ export function Button({ title, onPress, kind = 'primary', disabled }: {
 
 /** A tappable field that opens a list to choose from. */
 export function Select<T extends string>({ label, options, value, onChange, format = (v) => v }: {
-  label: string; options: T[]; value: T; onChange: (v: T) => void; format?: (v: T) => string;
+  label?: string; options: T[]; value: T; onChange: (v: T) => void; format?: (v: T) => string;
 }) {
   const t = useTheme();
   const [open, setOpen] = useState(false);
   return (
     <View>
-      <Text style={[s.caption, { color: t.muted, marginBottom: 4 }]}>{label}</Text>
-      <Pressable onPress={() => setOpen(true)} style={[s.select, { backgroundColor: t.surface }]}>
-        <Text style={[s.body, { color: t.text, flex: 1 }]}>{format(value)}</Text>
+      {label ? <Text style={[s.caption, { color: t.muted, marginBottom: 4 }]}>{label}</Text> : null}
+      <Pressable onPress={() => setOpen(true)} style={[s.select, { backgroundColor: t.surface }]} accessibilityRole="button" accessibilityLabel={label}>
+        <Text style={[s.body, { color: t.text, flex: 1 }]} numberOfLines={1}>{format(value)}</Text>
         <ChevronIcon color={t.muted} dir="down" />
       </Pressable>
       <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
@@ -238,23 +238,83 @@ export function Select<T extends string>({ label, options, value, onChange, form
   );
 }
 
-/** Whole-number input; 0 or empty means "not set". */
-export function NumberField({ label, help, value, onChange }: { label: string; help?: string; value: number; onChange: (v: number) => void }) {
+/** Number input; 0 or empty means "not set". `decimals` allows 37.5 (a comma works too). */
+export function NumberField({ label, help, value, onChange, decimals, placeholder = '0' }: {
+  label: string; help?: string; value: number; onChange: (v: number) => void; decimals?: boolean; placeholder?: string;
+}) {
   const t = useTheme();
+  const fill = useFill();
   const [text, setText] = useState(value ? String(value) : '');
+  const parse = (x: string) => (decimals ? Number(x.replace(',', '.').replace(/[^0-9.]/g, '')) : Number(x.replace(/[^0-9]/g, ''))) || 0;
   return (
     <View style={{ flex: 1, minWidth: 140 }}>
       <Text style={[s.caption, { color: t.text, fontWeight: '600' }]}>{label}</Text>
       <TextInput
         value={text}
         onChangeText={setText}
-        onEndEditing={() => onChange(Number(text.replace(/[^0-9]/g, '')) || 0)}
-        keyboardType="number-pad"
-        placeholder="0"
+        onEndEditing={() => onChange(parse(text))}
+        keyboardType={decimals ? 'decimal-pad' : 'number-pad'}
+        placeholder={placeholder}
         placeholderTextColor={t.muted}
-        style={[s.input, { backgroundColor: t.surface, color: t.text }]}
+        accessibilityLabel={label}
+        style={[s.input, { backgroundColor: fill, color: t.text }]}
       />
       {help ? <Text style={[s.caption, { color: t.muted }]}>{help}</Text> : null}
+    </View>
+  );
+}
+
+/** Labelled text input. */
+export function TextField({ label, value, onChange, help, multiline, placeholder, caps = 'sentences' }: {
+  label: string; value: string; onChange: (v: string) => void; help?: string; multiline?: boolean; placeholder?: string;
+  caps?: 'none' | 'sentences' | 'characters';
+}) {
+  const t = useTheme();
+  const fill = useFill();
+  return (
+    <View style={{ gap: 2 }}>
+      <Text style={[s.caption, { color: t.text, fontWeight: '600' }]}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChange}
+        multiline={multiline}
+        placeholder={placeholder}
+        placeholderTextColor={t.muted}
+        autoCapitalize={caps}
+        accessibilityLabel={label}
+        style={[s.input, { backgroundColor: fill, color: t.text }, multiline && { minHeight: 72, textAlignVertical: 'top' }]}
+      />
+      {help ? <Text style={[s.caption, { color: t.muted }]}>{help}</Text> : null}
+    </View>
+  );
+}
+
+/** − value + control for small whole numbers. */
+export function Stepper({ label, value, onChange, min = 1, max = 99, format = String }: {
+  label: string; value: number; onChange: (v: number) => void; min?: number; max?: number; format?: (v: number) => string;
+}) {
+  const t = useTheme();
+  const fill = useFill();
+  const btn = (d: number, text: string, hint: string) => {
+    const off = value + d < min || value + d > max;
+    return (
+      <Pressable
+        onPress={() => onChange(value + d)}
+        disabled={off}
+        style={({ pressed }) => [s.stepBtn, { backgroundColor: fill, opacity: off ? 0.35 : pressed ? 0.7 : 1 }]}
+        accessibilityLabel={hint}
+        hitSlop={6}
+      >
+        <Text style={{ color: t.text, fontSize: 20, fontWeight: '500' }}>{text}</Text>
+      </Pressable>
+    );
+  };
+  return (
+    <View style={[s.row, { gap: 10 }]}>
+      <Text style={[s.body, { color: t.text, flex: 1 }]}>{label}</Text>
+      {btn(-1, '−', `Less: ${label}`)}
+      <Text style={[s.body, s.bold, { color: t.text, minWidth: 64, textAlign: 'center' }]}>{format(value)}</Text>
+      {btn(1, '+', `More: ${label}`)}
     </View>
   );
 }
@@ -285,5 +345,6 @@ export const s = StyleSheet.create({
   backdrop: { flex: 1, backgroundColor: 'rgba(29,27,34,0.35)', justifyContent: 'center', padding: 24 },
   sheet: { borderRadius: 20, maxHeight: '75%', paddingVertical: 6 },
   option: { paddingVertical: 14, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth },
+  stepBtn: { width: 40, height: 40, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
   input: { borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14, fontSize: 16, marginVertical: 4 },
 });

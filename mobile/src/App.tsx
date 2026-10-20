@@ -2,7 +2,6 @@
  * entirely on the phone. Data is downloaded straight from Garmin Connect into the app's private
  * storage; nothing goes anywhere else. */
 
-import planDef from '@plan';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, AppState, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
@@ -14,7 +13,8 @@ import { clearTokens, GarminAuthError, loadTokens, type Tokens } from './garmin/
 import { addDays, fmtDate, type ISODate, todayISO } from './lib/dates';
 import { expoStore } from './lib/expoStore';
 import { setStore, store } from './lib/store';
-import { defaultStart, makePlan, P, setPlan } from './plan';
+import { hasPlan, P, type PlanData } from './plan';
+import { applyPlans, savePlans } from './planStore';
 import * as progression from './progression';
 import { sync, SyncCancelled } from './sync';
 import { buildTables, EMPTY, loadTables } from './tables';
@@ -28,6 +28,7 @@ import { CardioScreen } from './ui/screens/CardioScreen';
 import { CycleScreen } from './ui/screens/CycleScreen';
 import { RecoveryScreen } from './ui/screens/RecoveryScreen';
 import { SleepScreen } from './ui/screens/SleepScreen';
+import { PlanScreen } from './ui/screens/PlanScreen';
 import { TodayScreen } from './ui/screens/TodayScreen';
 import { TrainingScreen } from './ui/screens/TrainingScreen';
 import { ZonesScreen } from './ui/screens/ZonesScreen';
@@ -48,7 +49,7 @@ const syncedText = (ms: number) =>
   `${new Date(ms).toDateString() === new Date().toDateString() ? 'today' : fmtDate(todayISO(new Date(ms)), { weekday: false })} at ${clock(ms)}`;
 
 const TABS = [
-  ['Daily', TodayScreen], ['Training', TrainingScreen], ['Body & diet', BodyScreen], ['Recovery', RecoveryScreen],
+  ['Daily', TodayScreen], ['Plan', PlanScreen], ['Training', TrainingScreen], ['Body & diet', BodyScreen], ['Recovery', RecoveryScreen],
   ['Sleep', SleepScreen], ['Cycle', CycleScreen], ['Cardio & VO2max', CardioScreen], ['Heart-rate zones', ZonesScreen],
 ] as const;
 
@@ -58,17 +59,6 @@ export default function App() {
       <Main />
     </SafeAreaProvider>
   );
-}
-
-/** The plan with week 1 on the saved start date (fixed on first launch so the plan doesn't drift). */
-async function loadPlan(): Promise<A.Settings> {
-  let settings = await A.loadSettings();
-  if (!settings.planStart) {
-    await A.saveSetting('planStart', planDef.start ?? defaultStart());
-    settings = await A.loadSettings();
-  }
-  setPlan(makePlan(planDef, settings.planStart as ISODate));
-  return settings;
 }
 
 function Main() {
@@ -86,13 +76,17 @@ function Main() {
   const [showSettings, setShowSettings] = useState(false);
   const [showLogin, setShowLogin] = useState(false);
   const [planVersion, setPlanVersion] = useState(0);
+  const [plans, setPlans] = useState<PlanData[]>([]);
   const [lastSync, setLastSync] = useState<number | null>(null);
-  const [quiet, setQuiet] = useState(false); // a background sync is running
+  const [quiet, setQuiet] = useState<string | null>(null); // what's running in the background ("Syncing")
   const [quietError, setQuietError] = useState<string | null>(null);
   const quietCancel = useRef(false);
+  const watchPending = useRef(false); // plans changed while something else was running
+  const afterPlanSave = useRef(() => {});
 
   const reload = useCallback(async () => {
-    setSettings(await loadPlan());
+    setSettings(await A.loadSettings());
+    setPlans(await applyPlans());
     setHrTestsState(await A.loadHrTests());
     setData(await A.prepare(await loadTables()));
     setPlanVersion((v) => v + 1);
@@ -114,7 +108,12 @@ function Main() {
     // pred is for the Cycle tab, which is always about today (the Daily tab works out its own date's cycle day)
     return {
       d: data, today, info, phases, pred: A.predictCycle(info, todayISO()), sessions: data.sets.length ? A.liftSessions(data.sets) : [],
-      settings, hrTests, range,
+      settings, hrTests, range, plans,
+      savePlans: async (next) => {
+        await savePlans(next);
+        await reload();
+        afterPlanSave.current(); // the watch follows the plans
+      },
       setGoal: (goal) => A.saveSetting('goal', goal).then(() => setSettings((s) => ({ ...s, goal }))),
       setHrTests: (tests) => A.saveHrTests(tests).then(A.loadHrTests).then(setHrTestsState),
     };
@@ -155,34 +154,61 @@ function Main() {
     garminJob('Syncing with Garmin Connect', async (api, o) => {
       await sync(api, o);
       await reload();
-      await workouts.refresh(api, await history(), o.log);
+      await workouts.syncWatch(api, await history(), o.log);
       await synced();
       o.log('Done.');
     });
+  };
+
+  /** Run Garmin work without the progress sheet ("Syncing" next to the gear); problems show as a
+   * line under the header. Tapping Sync now stops it at its next request. */
+  const runQuietly = async (label: string, failed: string, fn: (api: Garmin, o: { log: () => void; cancelled: () => boolean }) => Promise<void>) => {
+    const fresh = await loadTokens();
+    if (!fresh) return;
+    quietCancel.current = false;
+    setQuiet(label);
+    try {
+      await fn(new Garmin(fresh), { log: () => {}, cancelled: () => quietCancel.current });
+    } catch (e) {
+      if (e instanceof GarminAuthError) setQuietError('Garmin login expired - sign in again in Settings.');
+      else if (!(e instanceof SyncCancelled)) setQuietError(`${failed}: ${(e as Error).message} Try Sync now in Settings.`);
+    } finally {
+      setQuiet(null);
+    }
   };
 
   /** Sync without the progress sheet, when the app opens and the last sync is over an hour old.
    * Only after a first full sync (that one takes long and needs the app kept open). */
   const quietSync = async () => {
     if (!tokens || quiet || job || !lastSync || Date.now() - lastSync < QUIET_SYNC_AFTER_MS) return;
-    const fresh = await loadTokens();
-    if (!fresh) return;
-    quietCancel.current = false;
-    setQuiet(true);
-    try {
-      const api = new Garmin(fresh);
-      const o = { log: () => {}, cancelled: () => quietCancel.current };
+    watchPending.current = false; // the sync updates the watch anyway
+    await runQuietly('Syncing', "Couldn't sync", async (api, o) => {
       await sync(api, o);
       await reload();
-      await workouts.refresh(api, await history(), o.log);
+      await workouts.syncWatch(api, await history(), o.log, o.cancelled);
       await synced();
-    } catch (e) {
-      if (e instanceof GarminAuthError) setQuietError('Garmin login expired - sign in again in Settings.');
-      else if (!(e instanceof SyncCancelled)) setQuietError(`Couldn't sync: ${(e as Error).message} Try Sync now in Settings.`);
-    } finally {
-      setQuiet(false);
-    }
+    });
   };
+
+  /** After a plan change: put the change on the Garmin calendar (only once the plans are on the watch). */
+  const updateWatch = async () => {
+    if (!tokens || !(await workouts.loadManifest())) return;
+    if (quiet || job) {
+      watchPending.current = true; // runs when the current job is done
+      return;
+    }
+    watchPending.current = false;
+    await runQuietly('Updating watch', "Couldn't update your watch", async (api, o) => {
+      await api.loadProfile();
+      await workouts.syncWatch(api, await history(), o.log, o.cancelled);
+    });
+  };
+  afterPlanSave.current = updateWatch;
+
+  // a plan change that came in while something else ran
+  useEffect(() => {
+    if (!quiet && !job && watchPending.current) updateWatch();
+  }, [quiet, job]);
   const quietSyncRef = useRef(quietSync);
   quietSyncRef.current = quietSync;
 
@@ -201,9 +227,7 @@ function Main() {
       await api.loadProfile();
       const h = await history();
       if (a === 'upload') await workouts.createAll(api, h, o.log);
-      else if (a === 'refresh') await workouts.refresh(api, h, o.log);
-      else if (a === 'strength' || a === 'cardio') await workouts.replace(api, h, a, o.log);
-      else if (a === 'extend') await workouts.extend(api, h, o.log);
+      else if (a === 'check') await workouts.syncWatch(api, h, o.log);
       else await workouts.deleteAll(api, o.log);
     });
 
@@ -233,7 +257,7 @@ function Main() {
 
   const Screen = TABS[tab][1];
   const last = hasData ? ctx.d.daily[ctx.d.daily.length - 1].date : null;
-  const startsSoon = todayISO() < P().firstDay;
+  const startsSoon = hasPlan() && todayISO() < P().firstDay;
   const isToday = today === todayISO();
 
   return (
@@ -245,7 +269,7 @@ function Main() {
           {quiet ? (
             <View style={st.syncing} accessibilityLiveRegion="polite">
               <ActivityIndicator color={t.accent} size="small" />
-              <Text style={{ color: t.muted, fontSize: 13 }}>Syncing</Text>
+              <Text style={{ color: t.muted, fontSize: 13 }}>{quiet}</Text>
             </View>
           ) : null}
           <Pressable onPress={() => setShowSettings(true)} hitSlop={10} style={st.iconBtn} accessibilityLabel="Settings">
@@ -254,8 +278,8 @@ function Main() {
         </View>
 
         <Text style={[st.sub, { color: t.muted }]} numberOfLines={2}>
-          {lastSync ? `Synced ${syncedText(lastSync)}. ` : last ? `Data up to ${fmtDate(last, { weekday: false })}. ` : ''}Plan {fmtDate(P().firstDay, { weekday: false })} to {fmtDate(P().end, { weekday: false, year: true })}
-          {startsSoon ? ' (starts soon, change it in Settings)' : ''}
+          {lastSync ? `Synced ${syncedText(lastSync)}. ` : last ? `Data up to ${fmtDate(last, { weekday: false })}. ` : ''}{hasPlan() ? `${P().name}: ${fmtDate(P().firstDay, { weekday: false })} to ${fmtDate(P().end, { weekday: false, year: true })}` : 'No plan running'}
+          {startsSoon ? ' (starts soon)' : ''}
         </Text>
         {quietError ? <Text style={[st.sub, { color: t.bad }]} numberOfLines={2}>{quietError}</Text> : null}
 
@@ -286,9 +310,9 @@ function Main() {
               <ChevronIcon color={t.text} dir="right" />
             </Pressable>
           </View>
-        ) : (
+        ) : TABS[tab][0] !== 'Plan' ? (
           <Segmented options={RANGES} value={range} onChange={setRange} stretch />
-        )}
+        ) : null}
         {hasData ? (
           <Screen c={ctx} />
         ) : (
@@ -303,13 +327,9 @@ function Main() {
         <SettingsSheet
           signedIn={!!tokens}
           lastSync={lastSync ? syncedText(lastSync) : null}
-          syncing={quiet}
+          syncing={quiet === 'Syncing'}
           onSync={startSync}
           onClose={() => setShowSettings(false)}
-          onPlanStart={async (d) => {
-            await A.saveSetting('planStart', d);
-            await reload();
-          }}
           onLogin={() => {
             setShowSettings(false);
             setShowLogin(true);

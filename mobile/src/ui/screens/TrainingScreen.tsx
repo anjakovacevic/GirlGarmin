@@ -4,7 +4,7 @@ import { View } from 'react-native';
 import * as A from '../../analysis';
 import { fmtDate, fmtShort, toDays } from '../../lib/dates';
 import { fmt, fmtSigned, isNum } from '../../lib/stats';
-import { P } from '../../plan';
+import { hasPlan, P, projectionEnd } from '../../plan';
 import { Chart } from '../Chart';
 import { Caption, Expander, Metric, MetricGrid, Notice, Section, Select, Table } from '../components';
 import type { Ctx } from '../context';
@@ -48,7 +48,7 @@ export function TrainingScreen({ c }: { c: Ctx }) {
   const weeklyShown = inRange(weekly, (w) => w.week, c.range, 28);
   const setsBucket = b === 'month' ? 'month' : 'week';
   const row = fc.find((f) => f.exercise === ex);
-  const end = P().end;
+  const end = projectionEnd();
   const muscleColors = colorFor(weekly.map((w) => w.muscle));
   const logged = pva.filter((p) => p.actual_sets !== null);
   const newest = [...pva].reverse();
@@ -107,7 +107,7 @@ export function TrainingScreen({ c }: { c: Ctx }) {
 
       <Section title="Plan vs what you did">
         {!pva.length ? (
-          <Caption>Starts filling in from {fmtShort(P().firstDay)}.</Caption>
+          <Caption>{hasPlan() ? `Starts filling in from ${fmtShort(P().firstDay)}.` : 'No plan running - start one in the Plan tab.'}</Caption>
         ) : (
           <>
             <PvaTable rows={newest.slice(0, RECENT_ROWS)} />
@@ -123,7 +123,7 @@ export function TrainingScreen({ c }: { c: Ctx }) {
         )}
         <Expander title="All forecasts">
           <Table
-            columns={['Exercise', 'Sessions', 'Best e1RM', 'Last e1RM', 'Trend kg/week', `Projected ${fmtShort(P().end)}`]}
+            columns={['Exercise', 'Sessions', 'Best e1RM', 'Last e1RM', 'Trend kg/week', `Projected ${fmtShort(end)}`]}
             rows={fc.map((f) => [A.pretty(f.exercise), f.sessions, fmt(f.best_e1rm, 1), fmt(f.last_e1rm, 1), fmt(f.trend_kg_per_week, 1), fmt(f.projected_e1rm_at_plan_end, 1)])}
           />
         </Expander>

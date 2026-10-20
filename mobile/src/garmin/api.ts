@@ -109,4 +109,6 @@ export class Garmin {
   scheduleWorkout = (id: number, day: string) =>
     this.request('POST', `/workout-service/schedule/${id}`, { json: { date: day } });
   deleteWorkout = (id: number) => this.request('DELETE', `/workout-service/workout/${id}`);
+  /** Take one entry off the calendar; the workout itself stays (it may be on other days too). */
+  unscheduleWorkout = (scheduleId: number) => this.request('DELETE', `/workout-service/schedule/${scheduleId}`);
 }

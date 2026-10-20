@@ -2,14 +2,11 @@ import { useEffect, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { addDays, fmtDate, type ISODate } from '../lib/dates';
-import { P } from '../plan';
 import { loadManifest } from '../workouts';
 import { Button, Caption, Section } from './components';
-import { ChevronIcon } from './icons';
 import { useTheme } from './theme';
 
-export type WatchAction = 'upload' | 'refresh' | 'strength' | 'cardio' | 'extend' | 'delete';
+export type WatchAction = 'upload' | 'check' | 'delete';
 
 export interface SettingsProps {
   signedIn: boolean;
@@ -17,7 +14,6 @@ export interface SettingsProps {
   syncing: boolean; // a background sync is running
   onSync: () => void;
   onClose: () => void;
-  onPlanStart: (d: ISODate) => void;
   onLogin: () => void;
   onLogout: () => void;
   onWatch: (a: WatchAction) => void;
@@ -31,12 +27,10 @@ const confirm = (title: string, text: string, ok: string, run: () => void, destr
 export function SettingsSheet(p: SettingsProps) {
   const t = useTheme();
   const insets = useSafeAreaInsets();
-  const [start, setStart] = useState(P().start);
   const [onWatch, setOnWatch] = useState<number | null>(null);
   useEffect(() => {
     loadManifest().then((m) => setOnWatch(m ? m.workouts.length : 0));
   }, []);
-  const plan = P();
   const needLogin = (fn: () => void) => () => (p.signedIn ? fn() : p.onLogin());
 
   return (
@@ -49,48 +43,27 @@ export function SettingsSheet(p: SettingsProps) {
           </Pressable>
         </View>
         <ScrollView contentContainerStyle={{ padding: 16, gap: 14, paddingBottom: insets.bottom + 24 }}>
-          <Section title="Training plan">
-            <Text style={{ color: t.text, fontSize: 15 }}>
-              {plan.weeks} weeks, {plan.sessions.length} lifting sessions a week. Edit it in mobile/src/plans/ (myPlan.ts if you have
-              one, else examplePlan.ts).
-            </Text>
-            <Text style={[st.label, { color: t.muted }]}>Week 1 starts on (Monday)</Text>
-            <View style={st.stepper}>
-              <Pressable onPress={() => setStart(addDays(start, -7))} style={[st.step, { backgroundColor: t.surface }]} accessibilityLabel="A week earlier">
-                <ChevronIcon color={t.text} dir="left" />
-              </Pressable>
-              <Text style={{ color: t.text, fontSize: 16, fontWeight: '700', flex: 1, textAlign: 'center' }}>
-                {fmtDate(start, { year: true })}
-              </Text>
-              <Pressable onPress={() => setStart(addDays(start, 7))} style={[st.step, { backgroundColor: t.surface }]} accessibilityLabel="A week later">
-                <ChevronIcon color={t.text} dir="right" />
-              </Pressable>
-            </View>
-            {start !== plan.start ? <Button title="Save plan start" onPress={() => p.onPlanStart(start)} /> : null}
-            <Caption>Plan runs {fmtDate(plan.start)} - {fmtDate(plan.end, { year: true })}. Moving the start moves the whole plan.</Caption>
-          </Section>
-
           <Section title="Workouts on your watch">
             <Caption>
-              Puts every planned session on your Garmin calendar, so it syncs to your watch: exercises, reps and target weights, with
-              warm-up and rest ending when you press lap. Cardio uses your Garmin heart-rate zones. After every sync, the coming
-              week's strength workouts are updated with targets from what you just lifted.
+              Puts your plans on your Garmin calendar, so every session syncs to your watch: exercises, reps and target weights,
+              with warm-up and rest ending when you press lap. Cardio uses your Garmin heart-rate zones.
             </Caption>
-            <Text style={{ color: t.text, fontSize: 15 }}>
-              {onWatch === null ? '' : onWatch ? `${onWatch} workouts uploaded from this phone.` : 'Nothing uploaded from this phone yet.'}
-            </Text>
             {!onWatch ? (
-              <Button title="Put the plan on my watch" onPress={needLogin(() => p.onWatch('upload'))} />
+              <>
+                <Text style={{ color: t.text, fontSize: 15 }}>{onWatch === null ? '' : 'Not on your watch yet.'}</Text>
+                <Button title="Put my plans on my watch" onPress={needLogin(() => p.onWatch('upload'))} />
+              </>
             ) : (
               <>
-                <Button kind="secondary" title="Update the next 7 days" onPress={needLogin(() => p.onWatch('refresh'))} />
-                <Button kind="secondary" title="Re-upload strength workouts from today" onPress={needLogin(() => p.onWatch('strength'))} />
-                <Button kind="secondary" title="Re-upload cardio workouts from today" onPress={needLogin(() => p.onWatch('cardio'))} />
-                <Button kind="secondary" title="Add plan days not on the watch yet" onPress={needLogin(() => p.onWatch('extend'))} />
+                <Text style={{ color: t.text, fontSize: 15 }}>
+                  On your watch. It follows your plans by itself: changes in the Plan tab, a plan ending or the next one starting
+                  reach the calendar right away, and every sync updates the coming week's target weights.
+                </Text>
+                <Button kind="secondary" title="Check the watch now" onPress={needLogin(() => p.onWatch('check'))} />
                 <Button
                   kind="danger"
-                  title="Remove the plan from my watch"
-                  onPress={needLogin(() => confirm('Remove workouts?', 'Deletes every workout this phone uploaded (recorded activities are never touched).', 'Remove', () => p.onWatch('delete'), true))}
+                  title="Remove my plans from the watch"
+                  onPress={needLogin(() => confirm('Remove workouts?', 'Deletes every workout this phone uploaded and stops updating the watch (recorded activities are never touched).', 'Remove', () => p.onWatch('delete'), true))}
                 />
               </>
             )}
@@ -135,7 +108,4 @@ export function SettingsSheet(p: SettingsProps) {
 
 const st = StyleSheet.create({
   bar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 4 },
-  label: { fontSize: 12.5, marginTop: 4 },
-  stepper: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  step: { borderRadius: 999, width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
 });

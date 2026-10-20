@@ -3,7 +3,7 @@ import { View } from 'react-native';
 import * as A from '../../analysis';
 import { diffDays, fmtShort, toDays } from '../../lib/dates';
 import { fmt, fmtSigned } from '../../lib/stats';
-import { P } from '../../plan';
+import { projectionEnd } from '../../plan';
 import { Chart, type Series } from '../Chart';
 import { Caption, Metric, MetricGrid, Notice, Section, Segmented } from '../components';
 import type { Ctx } from '../context';
@@ -47,7 +47,7 @@ export function BodyScreen({ c }: { c: Ctx }) {
   const from = rangeStart(range) ?? w[0].date;
   const trendFrom = from > w[0].date ? from : w[0].date;
   const last = w[w.length - 1];
-  const end = P().end;
+  const end = projectionEnd();
   const weeksLeft = Math.max(diffDays(end, last.date) / 7, 0);
   const [lo, hi] = A.lossTarget(last.weight_kg);
   const [pctLo, pctHi] = A.TARGET_LOSS_PCT_PER_WEEK;
