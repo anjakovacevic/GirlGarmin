@@ -13,7 +13,9 @@ import * as SecureStore from 'expo-secure-store';
 
 export const SSO = 'https://sso.garmin.com';
 export const CONNECTAPI = 'https://connectapi.garmin.com';
-export const MOBILE_SSO_CLIENT_ID = 'GCM_ANDROID_DARK';
+// The light version of the Garmin Connect app's sign-in page (same sign-in, only the colours differ
+// from GCM_ANDROID_DARK, which the Python library uses), to match the app's light look.
+export const MOBILE_SSO_CLIENT_ID = 'GCM_ANDROID_LIGHT';
 export const MOBILE_SERVICE_URL = 'https://mobile.integration.garmin.com/gcm/android';
 export const LOGIN_URL =
   `${SSO}/mobile/sso/en_US/sign-in?clientId=${MOBILE_SSO_CLIENT_ID}&service=${encodeURIComponent(MOBILE_SERVICE_URL)}`;

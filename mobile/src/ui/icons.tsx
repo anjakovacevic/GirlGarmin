@@ -1,6 +1,7 @@
 /** Line icons drawn with react-native-svg (instead of text glyphs, which look different on every phone). */
 
 import type { ReactNode } from 'react';
+import { Text, View } from 'react-native';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 type IconProps = { color: string; size?: number };
@@ -90,4 +91,14 @@ export const BodyIcon = ({ color, size }: IconProps) => (
     <Circle cx={12} cy={7.5} r={3.5} {...stroke(color)} />
     <Path d="M5 20.5v-1.5a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1.5" {...stroke(color)} />
   </Icon>
+);
+
+/** "GARMIN" wordmark with the delta triangle - drawn as an approximation of Garmin's logo. */
+export const GarminMark = ({ color, size = 16 }: IconProps) => (
+  <View style={{ flexDirection: 'row', alignItems: 'center', gap: size * 0.35 }} accessibilityLabel="Garmin">
+    <Svg width={size * 0.95} height={size * 0.82} viewBox="0 0 20 17">
+      <Path d="M10 0.5L19.5 16.5H0.5Z" fill={color} />
+    </Svg>
+    <Text style={{ color, fontSize: size, fontWeight: '800', letterSpacing: size * 0.14 }}>GARMIN</Text>
+  </View>
 );

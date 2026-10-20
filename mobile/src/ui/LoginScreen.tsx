@@ -10,7 +10,7 @@ import { WebView, type WebViewMessageEvent, type WebViewNavigation } from 'react
 import { Garmin } from '../garmin/api';
 import { exchangeTicket, LOGIN_URL, MOBILE_SERVICE_URL, parseTokenFile, saveTokens, ticketFrom, type Tokens } from '../garmin/auth';
 import { Button, Caption, Expander, Notice, Rich } from './components';
-import { KeyIcon, LockIcon, PhoneIcon } from './icons';
+import { GarminMark, KeyIcon, LockIcon, PhoneIcon } from './icons';
 import { useTheme } from './theme';
 
 /** Runs inside Garmin's sign-in page. After the password or the two-step code, the page gets the
@@ -145,7 +145,15 @@ export function LoginScreen({ onLoggedIn, onCancel }: { onLoggedIn: (t: Tokens) 
           ) : (
             <>
               {error ? <Notice tone="error" text={`**Sign-in didn't finish.** ${error}`} /> : null}
-              <Button title={error ? 'Try again' : 'Sign in with Garmin'} onPress={start} />
+              <Pressable
+                onPress={start}
+                accessibilityRole="button"
+                accessibilityLabel={error ? 'Try again: sign in with Garmin' : 'Sign in with Garmin'}
+                style={({ pressed }) => [st.garminBtn, { opacity: pressed ? 0.8 : 1 }]}
+              >
+                <Text style={{ color: '#ffffff', fontSize: 15, fontWeight: '600' }}>{error ? 'Try again with' : 'Sign in with'}</Text>
+                <GarminMark color="#ffffff" size={15} />
+              </Pressable>
               {onCancel ? <Button kind="secondary" title="Not now" onPress={onCancel} /> : null}
             </>
           )}
@@ -175,8 +183,8 @@ export function LoginScreen({ onLoggedIn, onCancel }: { onLoggedIn: (t: Tokens) 
       <Modal visible={web} animationType="slide" onRequestClose={() => setWeb(false)}>
         <View style={{ flex: 1, backgroundColor: t.card, paddingTop: insets.top }}>
           <View style={[st.bar, { borderBottomColor: t.border }]}>
-            <Text style={{ color: t.text, fontWeight: '700', fontSize: 16 }}>Garmin sign-in</Text>
-            <Pressable onPress={() => setWeb(false)} hitSlop={12}>
+            <GarminMark color={t.text} size={17} />
+            <Pressable onPress={() => setWeb(false)} hitSlop={12} accessibilityRole="button">
               <Text style={{ color: t.accent, fontSize: 16, fontWeight: '600' }}>Cancel</Text>
             </Pressable>
           </View>
@@ -184,13 +192,15 @@ export function LoginScreen({ onLoggedIn, onCancel }: { onLoggedIn: (t: Tokens) 
             source={{ uri: LOGIN_URL }}
             incognito
             forceDarkOn={false}
+            style={{ backgroundColor: t.card }}
+            containerStyle={{ backgroundColor: t.card }}
             setSupportMultipleWindows={false}
             injectedJavaScriptBeforeContentLoaded={CATCH_TICKET}
             onMessage={onMessage}
             onShouldStartLoadWithRequest={(r) => intercept(r.url)}
             onNavigationStateChange={(n: WebViewNavigation): void => { intercept(n.url); }}
             startInLoadingState
-            renderLoading={() => <ActivityIndicator style={StyleSheet.absoluteFill} color={t.accent} />}
+            renderLoading={() => <ActivityIndicator style={[StyleSheet.absoluteFill, { backgroundColor: t.card }]} color={t.accent} />}
           />
         </View>
       </Modal>
@@ -207,7 +217,8 @@ const st = StyleSheet.create({
   point: { flexDirection: 'row', gap: 14, alignItems: 'center' },
   pointIcon: { width: 36, height: 36, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
   status: { flexDirection: 'row', alignItems: 'center', gap: 12, borderRadius: 999, paddingVertical: 14, paddingHorizontal: 20 },
-  bar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16, borderBottomWidth: StyleSheet.hairlineWidth },
+  bar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 18, paddingVertical: 14, borderBottomWidth: StyleSheet.hairlineWidth },
+  garminBtn: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, backgroundColor: '#000000', borderRadius: 999, paddingVertical: 15 },
   paste: { borderRadius: 12, padding: 12, minHeight: 90, fontSize: 12, textAlignVertical: 'top' },
   fine: { fontSize: 12, lineHeight: 17, textAlign: 'center' },
 });

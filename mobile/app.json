@@ -14,7 +14,7 @@
     "android": {
       "package": "com.girlgarmin.app",
       "adaptiveIcon": {
-        "backgroundColor": "#FBE7EF",
+        "backgroundColor": "#B8336A",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -26,6 +26,11 @@
       "expo-secure-store",
       "expo-status-bar"
     ],
-    "backgroundColor": "#f4f3f6"
+    "backgroundColor": "#f4f3f6",
+    "extra": {
+      "eas": {
+        "projectId": "4f82c9a7-07b5-4e26-92f0-6e830465300e"
+      }
+    }
   }
 }
