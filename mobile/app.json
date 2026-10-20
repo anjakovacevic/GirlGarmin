@@ -1,0 +1,31 @@
+{
+  "expo": {
+    "name": "GirlGarmin",
+    "slug": "girlgarmin",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.girlgarmin.app",
+      "userInterfaceStyle": "light"
+    },
+    "android": {
+      "package": "com.girlgarmin.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#FBE7EF",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "userInterfaceStyle": "light"
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-status-bar"
+    ],
+    "backgroundColor": "#f4f3f6"
+  }
+}

@@ -50,6 +50,13 @@ bash scripts/dashboard.sh   # open the dashboard
 
 After that, click **🔄 Sync from Garmin** in the dashboard sidebar whenever you want new data.
 
+### On your phone 📱
+
+There is also a phone app with the same dashboard, in [`mobile/`](mobile/README.md). It runs on
+the phone by itself (Android now, iPhone later), signs in on Garmin's own page and keeps your data
+in the app. Quick start: install Node.js 22+, then `cd mobile`, `npm install`, `npx expo start`
+and scan the QR code with the Expo Go app.
+
 ---
 
 ## Your login is safe
@@ -184,6 +191,7 @@ GirlGarmin/
 │   ├── paths.py              # where data and login tokens live
 │   └── plans/
 │       └── example_plan.py   # the example 8-week plan: exercises, loads, progression, schedule
+├── mobile/                   # the phone app (Expo / React Native) - see mobile/README.md
 ├── scripts/                  # launchers: setup, dashboard, sync (.bat for Windows, .sh for macOS/Linux)
 ├── .streamlit/config.toml    # keeps the dashboard private to your computer
 ├── data/                     # created on first run, git-ignored: your Garmin data

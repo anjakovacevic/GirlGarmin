@@ -1,0 +1,289 @@
+/** Building blocks shared by the screens: cards, metrics, tables, text with **bold**, toggles. */
+
+import { createContext, type ReactNode, useContext, useState } from 'react';
+import { Modal, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+
+import { CheckIcon, ChevronIcon } from './icons';
+import { useTheme } from './theme';
+
+/** True inside a white card: tiles and controls there are filled grey; on the grey page, white. */
+const InCard = createContext(false);
+
+function useFill() {
+  const t = useTheme();
+  return useContext(InCard) ? t.surface : t.card;
+}
+
+export function Section({ title, children, right }: { title?: string; children: ReactNode; right?: ReactNode }) {
+  const t = useTheme();
+  return (
+    <InCard.Provider value>
+    <View style={[s.card, { backgroundColor: t.card }]}>
+      {title || right ? (
+        <View style={s.row}>
+          {title ? <Text style={[s.h2, { color: t.text }]}>{title}</Text> : null}
+          {right}
+        </View>
+      ) : null}
+      {children}
+    </View>
+    </InCard.Provider>
+  );
+}
+
+export function H3({ children }: { children: ReactNode }) {
+  const t = useTheme();
+  return <Text style={[s.h3, { color: t.text }]}>{children}</Text>;
+}
+
+export function Caption({ children }: { children: ReactNode }) {
+  const t = useTheme();
+  return <Text style={[s.caption, { color: t.muted }]}>{children}</Text>;
+}
+
+/** Text where **bold** parts are bold (the dashboard's tips use markdown bold). */
+export function Rich({ text, style }: { text: string; style?: object }) {
+  const t = useTheme();
+  const parts = text.split('**');
+  return (
+    <Text style={[s.body, { color: t.text }, style]}>
+      {parts.map((p, i) => (i % 2 ? <Text key={i} style={s.bold}>{p}</Text> : p))}
+    </Text>
+  );
+}
+
+export function Bullets({ items }: { items: string[] }) {
+  const t = useTheme();
+  return (
+    <View style={{ gap: 8 }}>
+      {items.map((x, i) => (
+        <View key={i} style={{ flexDirection: 'row', gap: 8 }}>
+          <View style={[s.dot, { backgroundColor: t.accent }]} />
+          <View style={{ flex: 1 }}>
+            <Rich text={x} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+type Tone = 'info' | 'success' | 'warn' | 'error';
+
+export function Notice({ tone = 'info', text }: { tone?: Tone; text: string }) {
+  const t = useTheme();
+  const bg = { info: t.infoBg, success: t.successBg, warn: t.warnBg, error: t.errorBg }[tone];
+  return (
+    <View style={[s.notice, { backgroundColor: bg }]}>
+      <Rich text={text} />
+    </View>
+  );
+}
+
+/** Streamlit-style metric: label, big value, optional delta. A delta starting with "-" counts
+ * as down; `deltaColor` "normal" = up is good, "inverse" = down is good, "off" = grey. */
+export function Metric({ label, value, delta, deltaColor = 'normal' }: {
+  label: string; value: string | number; delta?: string | null; deltaColor?: 'normal' | 'inverse' | 'off';
+}) {
+  const t = useTheme();
+  const fill = useFill();
+  const down = !!delta && delta.trim().startsWith('-');
+  const good = deltaColor === 'inverse' ? down : !down;
+  const color = deltaColor === 'off' ? t.muted : good ? t.good : t.bad;
+  return (
+    <View style={[s.metric, { backgroundColor: fill }]}>
+      <Text style={[s.metricLabel, { color: t.muted }]} numberOfLines={2}>{label}</Text>
+      <Text style={[s.metricValue, { color: t.text }]}>{String(value)}</Text>
+      {delta ? (
+        <Text style={[s.metricDelta, { color }]} numberOfLines={2}>
+          {deltaColor === 'off' ? '' : down ? '↓ ' : '↑ '}{delta}
+        </Text>
+      ) : null}
+    </View>
+  );
+}
+
+export function MetricGrid({ children }: { children: ReactNode }) {
+  return <View style={s.grid}>{children}</View>;
+}
+
+export interface Column {
+  label: string;
+  width?: number;
+  align?: 'left' | 'right';
+}
+
+/** A table that scrolls sideways when it is wider than the phone. */
+export function Table({ columns, rows }: { columns: (Column | string)[]; rows: (string | number | null | undefined)[][] }) {
+  const t = useTheme();
+  const cols: Column[] = columns.map((c) => (typeof c === 'string' ? { label: c } : c));
+  const widths = cols.map((c, i) => {
+    if (c.width) return c.width;
+    const longest = Math.max(c.label.length, ...rows.map((r) => String(r[i] ?? '').length));
+    return Math.min(260, Math.max(56, longest * 7.4 + 18));
+  });
+  const cell = (v: unknown, i: number, header = false) => (
+    <Text
+      key={i}
+      style={[s.cell, { width: widths[i], color: header ? t.muted : t.text, textAlign: cols[i].align ?? 'left' }, header && s.bold]}
+    >
+      {v === null || v === undefined || v === '' ? (header ? '' : '-') : String(v)}
+    </Text>
+  );
+  return (
+    <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ marginVertical: 4 }}>
+      <View>
+        <View style={[s.tr, { borderBottomColor: t.border }]}>{cols.map((c, i) => cell(c.label, i, true))}</View>
+        {rows.map((r, j) => (
+          <View key={j} style={[s.tr, { borderBottomColor: t.border }]}>{r.map((v, i) => cell(v, i))}</View>
+        ))}
+      </View>
+    </ScrollView>
+  );
+}
+
+/** `stretch` spreads the options over the full width. */
+export function Segmented<T extends string>({ options, value, onChange, stretch }: {
+  options: T[]; value: T; onChange: (v: T) => void; stretch?: boolean;
+}) {
+  const t = useTheme();
+  const fill = useFill();
+  return (
+    <View style={[s.segment, { backgroundColor: fill }, stretch && { alignSelf: 'stretch' }]} accessibilityRole="tablist">
+      {options.map((o) => (
+        <Pressable
+          key={o}
+          onPress={() => onChange(o)}
+          accessibilityRole="tab"
+          accessibilityState={{ selected: o === value }}
+          style={[s.segItem, stretch && { flex: 1, alignItems: 'center' }, o === value && { backgroundColor: t.accentSoft }]}
+        >
+          <Text style={{ color: o === value ? t.accent : t.muted, fontWeight: o === value ? '700' : '600', fontSize: 13.5 }}>{o}</Text>
+        </Pressable>
+      ))}
+    </View>
+  );
+}
+
+export function Toggle({ label, value, onChange }: { label: string; value: boolean; onChange: (v: boolean) => void }) {
+  const t = useTheme();
+  return (
+    <Pressable onPress={() => onChange(!value)} style={[s.row, { gap: 10, justifyContent: 'flex-start', paddingVertical: 6 }]}>
+      <View style={[s.box, { borderColor: value ? t.accent : t.border, backgroundColor: value ? t.accent : t.card }]}>
+        {value ? <CheckIcon color={t.accentText} /> : null}
+      </View>
+      <Text style={[s.body, { color: t.text, flex: 1 }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+export function Expander({ title, children, initiallyOpen = false }: { title: string; children: ReactNode; initiallyOpen?: boolean }) {
+  const t = useTheme();
+  const [open, setOpen] = useState(initiallyOpen);
+  return (
+    <View style={[s.expander, { borderColor: t.border }]}>
+      <Pressable onPress={() => setOpen(!open)} style={[s.row, { paddingVertical: 10 }]}>
+        <Text style={[s.body, s.bold, { color: t.text, flex: 1 }]}>{title}</Text>
+        <ChevronIcon color={t.muted} dir={open ? 'up' : 'down'} />
+      </Pressable>
+      {open ? <View style={{ paddingBottom: 10, gap: 8 }}>{children}</View> : null}
+    </View>
+  );
+}
+
+export function Button({ title, onPress, kind = 'primary', disabled }: {
+  title: string; onPress: () => void; kind?: 'primary' | 'secondary' | 'danger'; disabled?: boolean;
+}) {
+  const t = useTheme();
+  const bg = kind === 'primary' ? t.accent : kind === 'danger' ? t.errorBg : 'transparent';
+  const fg = kind === 'primary' ? t.accentText : kind === 'danger' ? t.bad : t.text;
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      style={({ pressed }) => [s.button, { backgroundColor: bg, borderColor: kind === 'secondary' ? t.outline : bg, opacity: disabled ? 0.4 : pressed ? 0.75 : 1 }]}
+    >
+      <Text style={{ color: fg, fontWeight: '600', fontSize: 15, textAlign: 'center' }}>{title}</Text>
+    </Pressable>
+  );
+}
+
+/** A tappable field that opens a list to choose from. */
+export function Select<T extends string>({ label, options, value, onChange, format = (v) => v }: {
+  label: string; options: T[]; value: T; onChange: (v: T) => void; format?: (v: T) => string;
+}) {
+  const t = useTheme();
+  const [open, setOpen] = useState(false);
+  return (
+    <View>
+      <Text style={[s.caption, { color: t.muted, marginBottom: 4 }]}>{label}</Text>
+      <Pressable onPress={() => setOpen(true)} style={[s.select, { backgroundColor: t.surface }]}>
+        <Text style={[s.body, { color: t.text, flex: 1 }]}>{format(value)}</Text>
+        <ChevronIcon color={t.muted} dir="down" />
+      </Pressable>
+      <Modal visible={open} transparent animationType="fade" onRequestClose={() => setOpen(false)}>
+        <Pressable style={s.backdrop} onPress={() => setOpen(false)}>
+          <View style={[s.sheet, { backgroundColor: t.card }]}>
+            <ScrollView>
+              {options.map((o) => (
+                <Pressable key={o} onPress={() => { onChange(o); setOpen(false); }} style={[s.option, { borderBottomColor: t.border }]}>
+                  <Text style={[s.body, { color: o === value ? t.accent : t.text, fontWeight: o === value ? '700' : '400' }]}>{format(o)}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+          </View>
+        </Pressable>
+      </Modal>
+    </View>
+  );
+}
+
+/** Whole-number input; 0 or empty means "not set". */
+export function NumberField({ label, help, value, onChange }: { label: string; help?: string; value: number; onChange: (v: number) => void }) {
+  const t = useTheme();
+  const [text, setText] = useState(value ? String(value) : '');
+  return (
+    <View style={{ flex: 1, minWidth: 140 }}>
+      <Text style={[s.caption, { color: t.text, fontWeight: '600' }]}>{label}</Text>
+      <TextInput
+        value={text}
+        onChangeText={setText}
+        onEndEditing={() => onChange(Number(text.replace(/[^0-9]/g, '')) || 0)}
+        keyboardType="number-pad"
+        placeholder="0"
+        placeholderTextColor={t.muted}
+        style={[s.input, { backgroundColor: t.surface, color: t.text }]}
+      />
+      {help ? <Text style={[s.caption, { color: t.muted }]}>{help}</Text> : null}
+    </View>
+  );
+}
+
+export const s = StyleSheet.create({
+  card: { borderRadius: 20, padding: 18, gap: 12 },
+  row: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  h2: { fontSize: 17, fontWeight: '700', letterSpacing: -0.2, flexShrink: 1 },
+  h3: { fontSize: 15, fontWeight: '600', marginTop: 6 },
+  body: { fontSize: 15, lineHeight: 22 },
+  bold: { fontWeight: '700' },
+  caption: { fontSize: 13, lineHeight: 18 },
+  dot: { width: 5, height: 5, borderRadius: 3, marginTop: 9 },
+  notice: { borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  metric: { flexGrow: 1, flexBasis: '45%', borderRadius: 14, paddingVertical: 12, paddingHorizontal: 14, gap: 3 },
+  metricLabel: { fontSize: 13 },
+  metricValue: { fontSize: 22, fontWeight: '700', letterSpacing: -0.4, fontVariant: ['tabular-nums'] },
+  metricDelta: { fontSize: 12.5, fontWeight: '600' },
+  tr: { flexDirection: 'row', borderBottomWidth: StyleSheet.hairlineWidth },
+  cell: { paddingVertical: 8, paddingHorizontal: 6, fontSize: 13, fontVariant: ['tabular-nums'] },
+  segment: { flexDirection: 'row', borderRadius: 12, padding: 3, alignSelf: 'flex-start' },
+  segItem: { paddingHorizontal: 14, paddingVertical: 7, borderRadius: 9 },
+  box: { width: 22, height: 22, borderRadius: 7, borderWidth: 1.5, alignItems: 'center', justifyContent: 'center' },
+  expander: { borderTopWidth: StyleSheet.hairlineWidth },
+  button: { borderRadius: 999, borderWidth: 1, paddingVertical: 13, paddingHorizontal: 20, alignItems: 'center' },
+  select: { flexDirection: 'row', alignItems: 'center', borderRadius: 12, paddingVertical: 12, paddingHorizontal: 14 },
+  backdrop: { flex: 1, backgroundColor: 'rgba(29,27,34,0.35)', justifyContent: 'center', padding: 24 },
+  sheet: { borderRadius: 20, maxHeight: '75%', paddingVertical: 6 },
+  option: { paddingVertical: 14, paddingHorizontal: 18, borderBottomWidth: StyleSheet.hairlineWidth },
+  input: { borderRadius: 12, paddingVertical: 11, paddingHorizontal: 14, fontSize: 16, marginVertical: 4 },
+});
